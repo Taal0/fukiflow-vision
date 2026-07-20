@@ -1,0 +1,21 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+
+# Large model weights (copy from MIT repo; do not commit)
+models/
+
+# Local smoke outputs
+fixtures/out/
+*.png
+!fixtures/.gitkeep
+
+# Local multi-root workspace
+fukiflow.code-workspace
