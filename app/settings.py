@@ -32,6 +32,13 @@ class Settings:
         self.box_threshold = float(os.environ.get("BOX_THRESHOLD", "0.7"))
         self.unclip_ratio = float(os.environ.get("UNCLIP_RATIO", "2.3"))
         self.inpainting_size = int(os.environ.get("INPAINTING_SIZE", "2048"))
+        # lama_large | solidfill | none
+        self.inpainter = os.environ.get("INPAINTER", "lama_large").strip().lower()
+        self.solidfill_ring = int(os.environ.get("SOLIDFILL_RING", "6"))
+        self.solidfill_uniform_tol = float(os.environ.get("SOLIDFILL_UNIFORM_TOL", "18"))
+        self.solidfill_uniform_frac = float(os.environ.get("SOLIDFILL_UNIFORM_FRAC", "0.85"))
+        self.solidfill_fill_dilate = int(os.environ.get("SOLIDFILL_FILL_DILATE", "2"))
+        self.solidfill_min_ring_px = int(os.environ.get("SOLIDFILL_MIN_RING_PX", "30"))
         self.mask_dilation_offset = int(os.environ.get("MASK_DILATION_OFFSET", "20"))
         self.kernel_size = int(os.environ.get("KERNEL_SIZE", "3"))
         self.verbose = os.environ.get("VERBOSE", "").lower() in ("1", "true", "yes")

@@ -27,6 +27,7 @@ from vision_engine.textline_merge import dispatch as dispatch_textline_merge
 from .postprocess import remove_inpaint_stains
 from .schemas import Box
 from .settings import Settings, get_settings
+from .solidfill import solid_fill_clean
 
 
 @dataclass
@@ -49,15 +50,24 @@ class VisionEngine:
 
     async def prepare(self) -> None:
         device = self.settings.device
-        await prepare_detection(Detector.default)
+        await prepare_detection(Detector.ctd)
         await prepare_ocr(Ocr.ocr48px, device)
-        await prepare_inpainting(Inpainter.lama_large, device)
+        # solidfill needs no model; none is lightweight; only LaMa downloads weights.
+        if self.settings.inpainter == "lama_large":
+            await prepare_inpainting(Inpainter.lama_large, device)
+        elif self.settings.inpainter == "none":
+            await prepare_inpainting(Inpainter.none, device)
+        elif self.settings.inpainter != "solidfill":
+            raise ValueError(
+                f"Unknown INPAINTER={self.settings.inpainter!r}; "
+                "use lama_large | solidfill | none"
+            )
         self._ready = True
 
     def _detector_cfg(self) -> DetectorConfig:
         s = self.settings
         return DetectorConfig(
-            detector=Detector.default,
+            detector=Detector.ctd,
             detection_size=s.detection_size,
             text_threshold=s.text_threshold,
             box_threshold=s.box_threshold,
@@ -72,8 +82,13 @@ class VisionEngine:
         precision = InpaintPrecision.bf16
         if self.settings.device in ("cpu", "mps"):
             precision = InpaintPrecision.fp32
+        key = (
+            Inpainter.none
+            if self.settings.inpainter == "none"
+            else Inpainter.lama_large
+        )
         return InpainterConfig(
-            inpainter=Inpainter.lama_large,
+            inpainter=key,
             inpainting_size=self.settings.inpainting_size,
             inpainting_precision=precision,
         )
@@ -84,7 +99,7 @@ class VisionEngine:
         verbose = self.settings.verbose
 
         textlines, mask_raw, mask = await dispatch_detection(
-            Detector.default,
+            Detector.ctd,
             img_rgb,
             det.detection_size,
             det.text_threshold,
@@ -136,10 +151,10 @@ class VisionEngine:
                 )
             )
 
-        # The detector's refined mask is usually None/empty; the real inpaint mask
-        # is produced by mask refinement from the raw mask + merged text regions
-        # (same as the MIT pipeline).
-        if text_regions and mask_raw is not None:
+        # Prefer a detector-provided refined mask (CTD). DBNet leaves this None and
+        # needs fit_text on the soft raw mask — do not run that path on CTD or the
+        # DBNet-tuned dilation_offset balloons masks outside bubbles.
+        if mask is None and text_regions and mask_raw is not None:
             mask = await dispatch_mask_refinement(
                 text_regions,
                 img_rgb,
@@ -165,24 +180,44 @@ class VisionEngine:
             height=int(img_rgb.shape[0]),
         )
 
-    async def inpaint(self, img_rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    async def inpaint(
+        self,
+        img_rgb: np.ndarray,
+        mask: np.ndarray,
+        boxes: Optional[List[Box]] = None,
+    ) -> Tuple[np.ndarray, List[Tuple[int, int, int, int]]]:
         if mask.shape[:2] != img_rgb.shape[:2]:
             raise ValueError(
                 f"mask shape {mask.shape[:2]} does not match image {img_rgb.shape[:2]}"
             )
+
+        s = self.settings
+        if s.inpainter == "solidfill":
+            cleaned, editor_regions = solid_fill_clean(
+                img_rgb,
+                mask,
+                boxes,
+                ring=s.solidfill_ring,
+                uniform_tol=s.solidfill_uniform_tol,
+                uniform_frac=s.solidfill_uniform_frac,
+                fill_dilate=s.solidfill_fill_dilate,
+                min_ring_px=s.solidfill_min_ring_px,
+            )
+            return cleaned.astype(np.uint8), editor_regions
+
         cfg = self._inpainter_cfg()
+        key = Inpainter.none if s.inpainter == "none" else Inpainter.lama_large
         cleaned = await dispatch_inpainting(
-            Inpainter.lama_large,
+            key,
             img_rgb,
             mask,
             cfg,
-            self.settings.inpainting_size,
-            self.settings.device,
-            self.settings.verbose,
+            s.inpainting_size,
+            s.device,
+            s.verbose,
         )
         cleaned = cleaned.astype(np.uint8)
-        if self.settings.inpaint_postprocess:
-            s = self.settings
+        if s.inpainter == "lama_large" and s.inpaint_postprocess:
             cleaned = remove_inpaint_stains(
                 cleaned,
                 mask,
@@ -194,7 +229,7 @@ class VisionEngine:
                 neighbor_ring=s.postprocess_neighbor_ring,
                 paint_dilate=s.postprocess_paint_dilate,
             )
-        return cleaned
+        return cleaned, []
 
 
 # Module-level singleton used by FastAPI lifespan

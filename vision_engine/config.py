@@ -16,6 +16,7 @@ class InpaintPrecision(str, Enum):
 
 class Detector(str, Enum):
     default = "default"
+    ctd = "ctd"
     none = "none"
 
 

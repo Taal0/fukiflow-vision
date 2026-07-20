@@ -13,6 +13,9 @@ pip install -r requirements.txt
 # Models (not in git) — copy from the MIT checkout if missing:
 # mkdir -p models
 # rsync -a ../fukiflow/backend-source-repos/manga-image-translator/models/{detection,ocr,inpainting} ./models/
+# CTD (default detector): place comictextdetector.pt under models/detection/
+#   (release: https://github.com/Taal0/fukiflow-vision/releases/tag/models-v1)
+#   or copy from MIT models/detection/ if you already have it.
 
 cp .env.example .env
 uvicorn app.main:app --host 0.0.0.0 --port 8001

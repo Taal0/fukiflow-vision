@@ -45,3 +45,7 @@ class InpaintJsonRequest(BaseModel):
 class InpaintResponse(BaseModel):
     page_id: Optional[str] = None
     cleaned_image: str = Field(..., description="Base64-encoded PNG")
+    editor_regions: List[Tuple[int, int, int, int]] = Field(
+        default_factory=list,
+        description="Bboxes [x1,y1,x2,y2] left for the editor (solidfill skip)",
+    )

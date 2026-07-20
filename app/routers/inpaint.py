@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -20,6 +20,10 @@ from ..schemas import Box, InpaintJsonRequest, InpaintResponse
 router = APIRouter(prefix="/v1", tags=["inpaint"])
 
 
+def _parse_boxes_json(boxes_json: str) -> List[Box]:
+    return [Box.model_validate(b) for b in json.loads(boxes_json)]
+
+
 @router.post("/inpaint")
 async def inpaint(
     file: UploadFile | None = File(None),
@@ -35,6 +39,9 @@ async def inpaint(
     Provide the page image via `file` or `image_b64`, and either:
     - `mask` / `mask_b64` (PNG from /detect-ocr), or
     - `boxes_json` (JSON list of Box objects; mask is rasterized from polygons).
+
+    When both mask and `boxes_json` are present, boxes are region hints for
+    solidfill (grouping / hull fill); the mask is still the inpaint mask.
     """
     if file is None and not image_b64:
         raise HTTPException(400, "Provide multipart `file` or form field `image_b64`")
@@ -47,10 +54,16 @@ async def inpaint(
     except Exception as e:
         raise HTTPException(400, f"Invalid image: {e}") from e
 
+    boxes: Optional[List[Box]] = None
+    if boxes_json:
+        try:
+            boxes = _parse_boxes_json(boxes_json)
+        except Exception as e:
+            raise HTTPException(400, f"Invalid boxes_json: {e}") from e
+
     mask_arr = None
     if mask is not None:
         try:
-            from ..images import decode_image_bytes as _dec
             import cv2
             import numpy as np
 
@@ -66,9 +79,8 @@ async def inpaint(
             mask_arr = decode_mask_b64(mask_b64)
         except Exception as e:
             raise HTTPException(400, f"Invalid mask_b64: {e}") from e
-    elif boxes_json:
+    elif boxes:
         try:
-            boxes = [Box.model_validate(b) for b in json.loads(boxes_json)]
             mask_arr = boxes_to_mask(img.shape[:2], boxes)
         except Exception as e:
             raise HTTPException(400, f"Invalid boxes_json: {e}") from e
@@ -77,13 +89,21 @@ async def inpaint(
 
     eng = get_engine()
     try:
-        cleaned = await eng.inpaint(img, mask_arr)
+        cleaned, editor_regions = await eng.inpaint(img, mask_arr, boxes=boxes)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
     if as_base64:
-        return InpaintResponse(page_id=page_id, cleaned_image=encode_png_b64(cleaned))
-    return Response(content=encode_png_bytes(cleaned), media_type="image/png")
+        return InpaintResponse(
+            page_id=page_id,
+            cleaned_image=encode_png_b64(cleaned),
+            editor_regions=editor_regions,
+        )
+    return Response(
+        content=encode_png_bytes(cleaned),
+        media_type="image/png",
+        headers={"X-Editor-Regions": json.dumps(editor_regions)},
+    )
 
 
 @router.post("/inpaint/json", response_model=InpaintResponse)
@@ -93,13 +113,18 @@ async def inpaint_json(body: InpaintJsonRequest) -> InpaintResponse:
     except Exception as e:
         raise HTTPException(400, f"Invalid image_b64: {e}") from e
 
+    boxes = body.boxes
     if body.mask_b64:
         mask_arr = decode_mask_b64(body.mask_b64)
-    elif body.boxes:
-        mask_arr = boxes_to_mask(img.shape[:2], body.boxes)
+    elif boxes:
+        mask_arr = boxes_to_mask(img.shape[:2], boxes)
     else:
         raise HTTPException(400, "Provide mask_b64 or boxes")
 
     eng = get_engine()
-    cleaned = await eng.inpaint(img, mask_arr)
-    return InpaintResponse(page_id=body.page_id, cleaned_image=encode_png_b64(cleaned))
+    cleaned, editor_regions = await eng.inpaint(img, mask_arr, boxes=boxes)
+    return InpaintResponse(
+        page_id=body.page_id,
+        cleaned_image=encode_png_b64(cleaned),
+        editor_regions=editor_regions,
+    )

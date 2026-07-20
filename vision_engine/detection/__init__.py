@@ -1,5 +1,6 @@
 import numpy as np
 
+from .ctd import ComicTextDetector
 from .default import DefaultDetector
 from .none import NoneDetector
 from .common import CommonDetector, OfflineDetector
@@ -7,6 +8,7 @@ from ..config import Detector
 
 DETECTORS = {
     Detector.default: DefaultDetector,
+    Detector.ctd: ComicTextDetector,
     Detector.none: NoneDetector,
 }
 detector_cache = {}
