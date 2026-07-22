@@ -14,19 +14,23 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     detector = engine_mod.create_bubble_detector(settings)
     ocr_svc = engine_mod.create_ocr_service(settings)
+    cleaner = engine_mod.create_clean_service(settings)
     detector.load()
     ocr_svc.load()
+    cleaner.load()
     engine_mod.set_detector(detector)
     engine_mod.set_ocr(ocr_svc)
+    engine_mod.set_cleaner(cleaner)
     yield
     engine_mod.set_detector(None)
     engine_mod.set_ocr(None)
+    engine_mod.set_cleaner(None)
 
 
 app = FastAPI(
     title="FukiFlow Vision",
     version="0.2.0",
-    description="Bubble detect (YOLO-seg) + manga-ocr; clean is a passive no-op stub.",
+    description="Bubble detect (YOLO-seg) + manga-ocr + inset-fill clean.",
     lifespan=lifespan,
 )
 

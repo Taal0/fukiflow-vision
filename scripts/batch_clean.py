@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
-"""Batch process manga pages via the local vision API (bubbles → ocr → clean no-op).
+"""Batch process manga pages via the local vision API (bubbles → ocr → clean).
 
 Usage:
+  python scripts/batch_clean.py
   python scripts/batch_clean.py /path/to/page.png
   python scripts/batch_clean.py "/path/to/test manga"
   python scripts/batch_clean.py "/path/to/test manga" /path/to/custom-out
   HOST=http://127.0.0.1:8001 python scripts/batch_clean.py ...
 
-Does not modify the input. Writes to a sibling *-translated/ folder (or arg2):
+Does not modify the input. Default input (no args):
+  /Users/talo/Desktop/test and result/test manga
+Default output (folder input): sibling ``<name>-translated v<N>`` with N = max existing + 1.
+
+Writes per page:
   <stem>-orig.<ext>   copy of the source
-  <stem>.png           cleaned result (identical to source while clean is disabled)
-  <stem>-bubbles.json  bubbles + text_ja from /v1/pipeline
+  <stem>.png           cleaned result
+  <stem>-detect.png    original + YOLO polygons (labels match ocr.json n)
+  <stem>-bubbles.json  bubbles + text_ja + clean/editor_regions
+
+Plus run-level:
+  ocr.json             { "<page_stem>": [{"n": 1, "text": "..."}, ...], ... }
 
 On name collision, writes *-overwritten / *-overwritten-N instead of overwriting.
 Stdlib only (no pip deps) so it can run against a remote API from another machine.
@@ -18,26 +27,32 @@ Stdlib only (no pip deps) so it can run against a remote API from another machin
 
 from __future__ import annotations
 
+import atexit
 import base64
 import json
 import mimetypes
 import os
+import re
 import shutil
 import sys
 import uuid
 from pathlib import Path
 from typing import Any
+
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 HOST = os.environ.get("HOST", "http://127.0.0.1:8001").rstrip("/")
 TIMEOUT = float(os.environ.get("BATCH_TIMEOUT", "600"))
+DEFAULT_INPUT = Path("/Users/talo/Desktop/test and result/test manga")
+_VERSIONED_OUT_RE = re.compile(r"^(.+)-translated v(\d+)$")
 
 
 def usage() -> None:
     print(
-        "Usage: batch_clean.py <image-or-folder> [output-folder]\n"
+        "Usage: batch_clean.py [image-or-folder] [output-folder]\n"
+        f"  default input: {DEFAULT_INPUT}\n"
         "  HOST=http://127.0.0.1:8001  (default)",
         file=sys.stderr,
     )
@@ -58,9 +73,24 @@ def collect_inputs(src: Path) -> list[Path]:
     return []
 
 
+def next_versioned_out_dir(src: Path) -> Path:
+    """``<parent>/<name>-translated v<N>`` with N = max existing + 1."""
+    parent = src.parent
+    base = src.name
+    max_n = 0
+    for child in parent.iterdir():
+        if not child.is_dir():
+            continue
+        m = _VERSIONED_OUT_RE.match(child.name)
+        if not m or m.group(1) != base:
+            continue
+        max_n = max(max_n, int(m.group(2)))
+    return parent / f"{base}-translated v{max_n + 1}"
+
+
 def default_out_dir(src: Path) -> Path:
     if src.is_dir():
-        return src.parent / f"{src.name}-translated"
+        return next_versioned_out_dir(src)
     return src.parent / f"{src.stem}-translated"
 
 
@@ -141,11 +171,12 @@ def check_health() -> None:
         raise SystemExit(f"error: models not loaded: {data}")
 
 
-def process_one(src: Path, out_dir: Path) -> None:
+def process_one(src: Path, out_dir: Path) -> list[dict[str, Any]]:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     orig_dest = unique_path(out_dir / f"{src.stem}-orig{src.suffix}")
     clean_dest = unique_path(out_dir / f"{src.stem}.png")
+    detect_dest = unique_path(out_dir / f"{src.stem}-detect.png")
     bubbles_dest = unique_path(out_dir / f"{src.stem}-bubbles.json")
 
     shutil.copy2(src, orig_dest)
@@ -159,18 +190,23 @@ def process_one(src: Path, out_dir: Path) -> None:
         raise RuntimeError("pipeline response missing bubbles")
     if not payload.get("cleaned_image"):
         raise RuntimeError("pipeline response missing cleaned_image")
+    if not payload.get("bubbles_overlay"):
+        raise RuntimeError("pipeline response missing bubbles_overlay")
 
     cleaned = base64.b64decode(payload["cleaned_image"])
     clean_dest.write_bytes(cleaned)
+    detect_dest.write_bytes(base64.b64decode(payload["bubbles_overlay"]))
 
     bubbles = payload.get("bubbles") or []
+    editor_regions = payload.get("editor_regions") or []
     bubbles_dest.write_text(
         json.dumps(
             {
                 "page_id": payload.get("page_id"),
                 "width": payload.get("width"),
                 "height": payload.get("height"),
-                "clean": payload.get("clean", "disabled"),
+                "clean": payload.get("clean", "ok"),
+                "editor_regions": editor_regions,
                 "bubbles": bubbles,
             },
             indent=2,
@@ -180,20 +216,44 @@ def process_one(src: Path, out_dir: Path) -> None:
         encoding="utf-8",
     )
 
-    clean_flag = payload.get("clean", "disabled")
+    ocr_entries = [
+        {"n": i + 1, "text": b.get("text_ja")}
+        for i, b in enumerate(bubbles)
+        if isinstance(b, dict)
+    ]
+
+    clean_flag = payload.get("clean", "ok")
     print(
         f"OK  {src.name}  bubbles={len(bubbles)}  clean={clean_flag}  "
+        f"editor={len(editor_regions)}  "
         f"orig→{orig_dest.name}  clean→{clean_dest.name}  "
-        f"json→{bubbles_dest.name}"
+        f"detect→{detect_dest.name}  json→{bubbles_dest.name}"
     )
+    return ocr_entries
+
+
+def write_ocr_json(out_dir: Path, ocr_by_page: dict[str, list[dict[str, Any]]]) -> None:
+    if not ocr_by_page:
+        return
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dest = out_dir / "ocr.json"
+    dest.write_text(
+        json.dumps(ocr_by_page, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    print(f"ocr.json → {dest}  ({len(ocr_by_page)} page(s))")
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 2 or argv[1] in {"-h", "--help"}:
+    if len(argv) >= 2 and argv[1] in {"-h", "--help"}:
         usage()
         return 2
 
-    src = Path(argv[1]).expanduser().resolve()
+    if len(argv) >= 2:
+        src = Path(argv[1]).expanduser().resolve()
+    else:
+        src = DEFAULT_INPUT.expanduser().resolve()
+
     out_override = Path(argv[2]).expanduser().resolve() if len(argv) >= 3 else None
 
     if not src.exists():
@@ -223,15 +283,30 @@ def main(argv: list[str]) -> int:
     check_health()
     print("health=ok")
 
+    ocr_by_page: dict[str, list[dict[str, Any]]] = {}
+    ocr_written = False
+
+    def _flush_ocr() -> None:
+        nonlocal ocr_written
+        if ocr_written or not ocr_by_page:
+            return
+        write_ocr_json(out_dir, ocr_by_page)
+        ocr_written = True
+
+    atexit.register(_flush_ocr)
+
     ok = 0
     failed: list[str] = []
-    for img in images:
-        try:
-            process_one(img, out_dir)
-            ok += 1
-        except Exception as e:
-            print(f"FAIL  {img.name}: {e}", file=sys.stderr)
-            failed.append(img.name)
+    try:
+        for img in images:
+            try:
+                ocr_by_page[img.stem] = process_one(img, out_dir)
+                ok += 1
+            except Exception as e:
+                print(f"FAIL  {img.name}: {e}", file=sys.stderr)
+                failed.append(img.name)
+    finally:
+        _flush_ocr()
 
     print(f"done: ok={ok} fail={len(failed)} → {out_dir}")
     if failed:

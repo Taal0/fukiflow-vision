@@ -23,9 +23,15 @@ class OcrResponse(BaseModel):
 
 class CleanResponse(BaseModel):
     page_id: Optional[str] = None
-    cleaned_image: str = Field(..., description="Base64-encoded PNG (original when clean disabled)")
-    editor_regions: List[Tuple[int, int, int, int]] = Field(default_factory=list)
-    clean: str = Field("disabled", description="'disabled' while clean is a no-op stub")
+    cleaned_image: str = Field(..., description="Base64-encoded PNG after inset-fill clean")
+    editor_regions: List[Tuple[int, int, int, int]] = Field(
+        default_factory=list,
+        description="BBoxes skipped (textured / too small / empty after inset)",
+    )
+    clean: str = Field(
+        "ok",
+        description="'ok' if all bubbles filled; 'partial' if any skipped",
+    )
 
 
 class PipelineResponse(BaseModel):
@@ -33,9 +39,13 @@ class PipelineResponse(BaseModel):
     width: int
     height: int
     bubbles: List[Bubble]
-    cleaned_image: str = Field(..., description="Base64 PNG; equals original while clean disabled")
+    cleaned_image: str = Field(..., description="Base64 PNG after inset-fill clean")
+    bubbles_overlay: str = Field(
+        ...,
+        description="Base64 PNG: original with YOLO polygons + 1-based labels",
+    )
     editor_regions: List[Tuple[int, int, int, int]] = Field(default_factory=list)
-    clean: str = "disabled"
+    clean: str = Field("ok", description="'ok' or 'partial'")
 
 
 class HealthResponse(BaseModel):

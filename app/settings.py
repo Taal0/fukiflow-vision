@@ -40,6 +40,13 @@ class Settings:
         self.ocr_model = str(ocr_candidate.resolve()) if ocr_candidate.exists() else ocr_raw
         self.ocr_crop_pad = int(os.environ.get("OCR_CROP_PAD", "4"))
 
+        # 3px left outline ink; 8 cleared it (v11); +2 keeps fill off art that clips bubbles.
+        self.clean_inset = int(os.environ.get("CLEAN_INSET", "10"))
+        self.clean_ring = int(os.environ.get("CLEAN_RING", "6"))
+        self.clean_uniform_tol = float(os.environ.get("CLEAN_UNIFORM_TOL", "18"))
+        self.clean_uniform_frac = float(os.environ.get("CLEAN_UNIFORM_FRAC", "0.85"))
+        self.clean_min_ring_px = int(os.environ.get("CLEAN_MIN_RING_PX", "30"))
+
         self.verbose = os.environ.get("VERBOSE", "").lower() in ("1", "true", "yes")
         os.environ.setdefault("MODELS_DIR", str(self.models_dir))
 

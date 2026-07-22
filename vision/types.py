@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 Point = List[float]  # [x, y]
 BBox = Tuple[int, int, int, int]  # x1, y1, x2, y2
+EditorRegion = BBox  # skipped clean region [x1, y1, x2, y2]
 
 
 class Bubble(BaseModel):

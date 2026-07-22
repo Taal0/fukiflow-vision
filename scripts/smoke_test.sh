@@ -59,11 +59,16 @@ echo "== pipeline =="
 curl -sf -X POST "$HOST/v1/pipeline" \
   -F "file=@${IMG}" \
   -o "$OUT/pipeline.json"
-python3 - <<'PY' "$OUT/pipeline.json" "$OUT/cleaned.png"
+python3 - <<'PY' "$OUT/pipeline.json" "$OUT/cleaned.png" "$OUT/detect.png"
 import json, base64, sys
 from pathlib import Path
 data = json.loads(Path(sys.argv[1]).read_text())
 Path(sys.argv[2]).write_bytes(base64.b64decode(data["cleaned_image"]))
-print(f"bubbles={len(data['bubbles'])} clean={data.get('clean')} → {sys.argv[2]}")
+if data.get("bubbles_overlay"):
+    Path(sys.argv[3]).write_bytes(base64.b64decode(data["bubbles_overlay"]))
+print(
+    f"bubbles={len(data['bubbles'])} clean={data.get('clean')} "
+    f"→ {sys.argv[2]} detect→{sys.argv[3]}"
+)
 PY
 echo "OK → $OUT/"
