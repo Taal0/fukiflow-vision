@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batch clean manga pages via the local vision API.
+"""Batch process manga pages via the local vision API (bubbles → ocr → clean no-op).
 
 Usage:
   python scripts/batch_clean.py /path/to/page.png
@@ -9,9 +9,8 @@ Usage:
 
 Does not modify the input. Writes to a sibling *-translated/ folder (or arg2):
   <stem>-orig.<ext>   copy of the source
-  <stem>.png           cleaned result
-  <stem>-editor.json   (only if X-Editor-Regions non-empty)
-  <stem>-editor.png    cleaned + red boxes (same condition)
+  <stem>.png           cleaned result (identical to source while clean is disabled)
+  <stem>-bubbles.json  bubbles + text_ja from /v1/pipeline
 
 On name collision, writes *-overwritten / *-overwritten-N instead of overwriting.
 Stdlib only (no pip deps) so it can run against a remote API from another machine.
@@ -24,10 +23,8 @@ import json
 import mimetypes
 import os
 import shutil
-import struct
 import sys
 import uuid
-import zlib
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -131,141 +128,17 @@ def http_json(method: str, url: str, body: bytes | None = None, content_type: st
         raise RuntimeError(f"request failed {url}: {e.reason}") from e
 
 
-def http_bytes_and_headers(
-    url: str, body: bytes, content_type: str
-) -> tuple[bytes, dict[str, str]]:
-    req = Request(url, data=body, headers={"Content-Type": content_type}, method="POST")
-    try:
-        with urlopen(req, timeout=TIMEOUT) as resp:
-            headers = {k.lower(): v for k, v in resp.headers.items()}
-            return resp.read(), headers
-    except HTTPError as e:
-        detail = e.read().decode(errors="replace")[:300]
-        raise RuntimeError(f"HTTP {e.code} {url}: {detail}") from e
-    except URLError as e:
-        raise RuntimeError(f"request failed {url}: {e.reason}") from e
-
-
-def _png_chunk(tag: bytes, data: bytes) -> bytes:
-    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
-
-
-def _decode_png_rgb(data: bytes) -> tuple[int, int, bytearray]:
-    """Decode 8-bit RGB/RGBA non-interlaced PNG → (w, h, RGB bytes)."""
-    if data[:8] != b"\x89PNG\r\n\x1a\n":
-        raise ValueError("not a PNG")
-    pos = 8
-    width = height = None
-    color_type = None
-    bit_depth = None
-    idat = bytearray()
-    while pos + 8 <= len(data):
-        length = struct.unpack(">I", data[pos : pos + 4])[0]
-        tag = data[pos + 4 : pos + 8]
-        chunk = data[pos + 8 : pos + 8 + length]
-        pos += 12 + length
-        if tag == b"IHDR":
-            width, height, bit_depth, color_type = struct.unpack(">IIBB", chunk[:10])
-        elif tag == b"IDAT":
-            idat.extend(chunk)
-        elif tag == b"IEND":
-            break
-    if width is None or height is None or bit_depth != 8 or color_type not in (2, 6):
-        raise ValueError("unsupported PNG (need 8-bit RGB/RGBA)")
-    raw = zlib.decompress(bytes(idat))
-    bpp = 3 if color_type == 2 else 4
-    stride = 1 + width * bpp
-    if len(raw) != stride * height:
-        raise ValueError("bad PNG size")
-    prev = bytearray(width * bpp)
-    out = bytearray(width * height * 3)
-    for y in range(height):
-        row = raw[y * stride : (y + 1) * stride]
-        filt, scan = row[0], bytearray(row[1:])
-        if filt == 1:  # Sub
-            for i in range(bpp, len(scan)):
-                scan[i] = (scan[i] + scan[i - bpp]) & 0xFF
-        elif filt == 2:  # Up
-            for i in range(len(scan)):
-                scan[i] = (scan[i] + prev[i]) & 0xFF
-        elif filt == 3:  # Average
-            for i in range(len(scan)):
-                left = scan[i - bpp] if i >= bpp else 0
-                scan[i] = (scan[i] + ((left + prev[i]) // 2)) & 0xFF
-        elif filt == 4:  # Paeth
-            for i in range(len(scan)):
-                a = scan[i - bpp] if i >= bpp else 0
-                b = prev[i]
-                c = prev[i - bpp] if i >= bpp else 0
-                p = a + b - c
-                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
-                pr = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
-                scan[i] = (scan[i] + pr) & 0xFF
-        elif filt != 0:
-            raise ValueError(f"unsupported PNG filter {filt}")
-        prev = scan
-        dst = y * width * 3
-        if bpp == 3:
-            out[dst : dst + width * 3] = scan
-        else:
-            for x in range(width):
-                si = x * 4
-                di = dst + x * 3
-                out[di : di + 3] = scan[si : si + 3]
-    return width, height, out
-
-
-def _encode_png_rgb(width: int, height: int, rgb: bytes | bytearray) -> bytes:
-    raw = bytearray()
-    row_bytes = width * 3
-    for y in range(height):
-        raw.append(0)  # filter None
-        start = y * row_bytes
-        raw.extend(rgb[start : start + row_bytes])
-    return b"".join(
-        [
-            b"\x89PNG\r\n\x1a\n",
-            _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)),
-            _png_chunk(b"IDAT", zlib.compress(bytes(raw), 9)),
-            _png_chunk(b"IEND", b""),
-        ]
-    )
-
-
-def draw_editor_boxes(png_bytes: bytes, regions: list[list[int]]) -> bytes:
-    """Draw red rectangles on a cleaned PNG (stdlib)."""
-    w, h, rgb = _decode_png_rgb(png_bytes)
-    thickness = 3
-    for box in regions:
-        if len(box) != 4:
-            continue
-        x1, y1, x2, y2 = (int(v) for v in box)
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(w - 1, x2), min(h - 1, y2)
-        if x2 <= x1 or y2 <= y1:
-            continue
-        for t in range(thickness):
-            yy1, yy2 = min(h - 1, y1 + t), max(0, y2 - t)
-            xx1, xx2 = min(w - 1, x1 + t), max(0, x2 - t)
-            for x in range(xx1, xx2 + 1):
-                for y in (yy1, yy2):
-                    i = (y * w + x) * 3
-                    rgb[i : i + 3] = b"\xff\x00\x00"
-            for y in range(yy1, yy2 + 1):
-                for x in (xx1, xx2):
-                    i = (y * w + x) * 3
-                    rgb[i : i + 3] = b"\xff\x00\x00"
-    return _encode_png_rgb(w, h, rgb)
-
-
 def check_health() -> None:
     url = f"{HOST}/health"
     try:
         data = http_json("GET", url)
     except Exception as e:
         raise SystemExit(f"error: health check failed ({url}): {e}") from e
-    if not isinstance(data, dict) or data.get("status") != "ok" or not data.get("models_loaded"):
+    if not isinstance(data, dict) or data.get("status") != "ok":
         raise SystemExit(f"error: service not ready: {data}")
+    models = data.get("models") or {}
+    if not models.get("bubble") or not models.get("ocr"):
+        raise SystemExit(f"error: models not loaded: {data}")
 
 
 def process_one(src: Path, out_dir: Path) -> None:
@@ -273,63 +146,45 @@ def process_one(src: Path, out_dir: Path) -> None:
 
     orig_dest = unique_path(out_dir / f"{src.stem}-orig{src.suffix}")
     clean_dest = unique_path(out_dir / f"{src.stem}.png")
+    bubbles_dest = unique_path(out_dir / f"{src.stem}-bubbles.json")
 
     shutil.copy2(src, orig_dest)
 
     img_bytes = src.read_bytes()
     mime = mimetypes.guess_type(src.name)[0] or "application/octet-stream"
 
-    body, ctype = _multipart(
-        {"file": (src.name, img_bytes, mime)},
-    )
-    payload = http_json("POST", f"{HOST}/v1/detect-ocr", body=body, content_type=ctype)
-    if not isinstance(payload, dict) or not payload.get("mask"):
-        raise RuntimeError("detect-ocr response missing mask")
-    mask_bytes = base64.b64decode(payload["mask"])
-    boxes = payload.get("boxes") or []
-    n_boxes = len(boxes)
+    body, ctype = _multipart({"file": (src.name, img_bytes, mime)})
+    payload = http_json("POST", f"{HOST}/v1/pipeline", body=body, content_type=ctype)
+    if not isinstance(payload, dict) or "bubbles" not in payload:
+        raise RuntimeError("pipeline response missing bubbles")
+    if not payload.get("cleaned_image"):
+        raise RuntimeError("pipeline response missing cleaned_image")
 
-    fields: dict[str, tuple[str, bytes, str] | str | bytes] = {
-        "file": (src.name, img_bytes, mime),
-        "mask": ("mask.png", mask_bytes, "image/png"),
-    }
-    if boxes:
-        # Plain form field (Form str) — not a file part, or FastAPI 422s.
-        fields["boxes_json"] = json.dumps(boxes)
-    body, ctype = _multipart(fields)
-    cleaned, headers = http_bytes_and_headers(f"{HOST}/v1/inpaint", body, ctype)
+    cleaned = base64.b64decode(payload["cleaned_image"])
     clean_dest.write_bytes(cleaned)
 
-    editor_regions: list[Any] = []
-    raw_regions = headers.get("x-editor-regions", "").strip()
-    if raw_regions:
-        try:
-            parsed = json.loads(raw_regions)
-            if isinstance(parsed, list):
-                editor_regions = parsed
-        except json.JSONDecodeError:
-            pass
-
-    editor_n = len(editor_regions)
-    extra = ""
-    if editor_n:
-        editor_json = unique_path(out_dir / f"{src.stem}-editor.json")
-        editor_json.write_text(
-            json.dumps({"editor_regions": editor_regions}, indent=2) + "\n",
-            encoding="utf-8",
+    bubbles = payload.get("bubbles") or []
+    bubbles_dest.write_text(
+        json.dumps(
+            {
+                "page_id": payload.get("page_id"),
+                "width": payload.get("width"),
+                "height": payload.get("height"),
+                "clean": payload.get("clean", "disabled"),
+                "bubbles": bubbles,
+            },
+            indent=2,
+            ensure_ascii=False,
         )
-        editor_png = unique_path(out_dir / f"{src.stem}-editor.png")
-        try:
-            editor_png.write_bytes(draw_editor_boxes(cleaned, editor_regions))
-            extra = f"  editor={editor_n}→{editor_json.name},{editor_png.name}"
-        except Exception as e:
-            extra = f"  editor={editor_n}→{editor_json.name} (png failed: {e})"
-    else:
-        extra = "  editor=0"
+        + "\n",
+        encoding="utf-8",
+    )
 
+    clean_flag = payload.get("clean", "disabled")
     print(
-        f"OK  {src.name}  boxes={n_boxes}  "
-        f"orig→{orig_dest.name}  clean→{clean_dest.name}{extra}"
+        f"OK  {src.name}  bubbles={len(bubbles)}  clean={clean_flag}  "
+        f"orig→{orig_dest.name}  clean→{clean_dest.name}  "
+        f"json→{bubbles_dest.name}"
     )
 
 

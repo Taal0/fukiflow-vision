@@ -1,51 +1,44 @@
 from __future__ import annotations
 
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
-
-Point = List[float]  # [x, y]
-Quad = List[Point]  # 4 points
+from vision.types import Bubble
 
 
-class Box(BaseModel):
-    """One text region after detect+OCR (+ textline merge)."""
-
-    polygon: Union[Quad, List[Quad]] = Field(
-        ...,
-        description="Single quad [[x,y]x4] or list of quads (one per textline)",
-    )
-    bbox: Tuple[int, int, int, int] = Field(..., description="Axis-aligned [x1, y1, x2, y2]")
-    text_ja: str = ""
-    confidence: float = 0.0
-
-
-class DetectOcrResponse(BaseModel):
+class BubblesResponse(BaseModel):
     page_id: str
-    boxes: List[Box]
-    mask: str = Field(..., description="Base64-encoded PNG mask for /v1/inpaint")
     width: int
     height: int
+    bubbles: List[Bubble]
+
+
+class OcrResponse(BaseModel):
+    page_id: Optional[str] = None
+    width: int
+    height: int
+    bubbles: List[Bubble]
+
+
+class CleanResponse(BaseModel):
+    page_id: Optional[str] = None
+    cleaned_image: str = Field(..., description="Base64-encoded PNG (original when clean disabled)")
+    editor_regions: List[Tuple[int, int, int, int]] = Field(default_factory=list)
+    clean: str = Field("disabled", description="'disabled' while clean is a no-op stub")
+
+
+class PipelineResponse(BaseModel):
+    page_id: str
+    width: int
+    height: int
+    bubbles: List[Bubble]
+    cleaned_image: str = Field(..., description="Base64 PNG; equals original while clean disabled")
+    editor_regions: List[Tuple[int, int, int, int]] = Field(default_factory=list)
+    clean: str = "disabled"
 
 
 class HealthResponse(BaseModel):
     status: str
     device: str
-    models_loaded: bool
-
-
-class InpaintJsonRequest(BaseModel):
-    image_b64: str
-    mask_b64: Optional[str] = None
-    boxes: Optional[List[Box]] = None
-    page_id: Optional[str] = None
-
-
-class InpaintResponse(BaseModel):
-    page_id: Optional[str] = None
-    cleaned_image: str = Field(..., description="Base64-encoded PNG")
-    editor_regions: List[Tuple[int, int, int, int]] = Field(
-        default_factory=list,
-        description="Bboxes [x1,y1,x2,y2] left for the editor (solidfill skip)",
-    )
+    models: Dict[str, bool]

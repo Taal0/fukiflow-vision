@@ -4,31 +4,17 @@ uvicorn[standard]>=0.27
 python-multipart>=0.0.9
 pydantic>=2.5
 pillow>=10.0
+python-dotenv
 
-# Vendored vision_engine runtime (detection / OCR / inpainting)
+# Bubble detect + manga OCR
+ultralytics>=8.3.0
+manga-ocr
 torch
 torchvision
 numpy==1.26.4
 opencv-python
-einops
-shapely
-pyclipper
-scikit-image
-kornia
-networkx
 tqdm
 requests
-aiohttp
 huggingface_hub
 safetensors
-omegaconf
-python-dotenv
-colorama
-py3langid==0.2.2
-backports.cached-property; python_version < "3.8"
-onnxruntime
-manga-ocr
-timm
 protobuf>=3.20.2,<6.0.0
-# Not on PyPI as a stable wheel — same pin as MIT
-pydensecrf@https://github.com/lucasb-eyer/pydensecrf/archive/refs/heads/master.zip

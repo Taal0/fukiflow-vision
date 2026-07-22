@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-from typing import Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -36,49 +35,3 @@ def encode_png_bytes(img_rgb: np.ndarray) -> bytes:
 
 def encode_png_b64(img: np.ndarray) -> str:
     return base64.b64encode(encode_png_bytes(img)).decode("ascii")
-
-
-def decode_mask_b64(b64: str) -> np.ndarray:
-    raw = b64
-    if "," in raw and raw.strip().startswith("data:"):
-        raw = raw.split(",", 1)[1]
-    arr = np.frombuffer(base64.b64decode(raw), dtype=np.uint8)
-    mask = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
-    if mask is None:
-        raise ValueError("Could not decode mask PNG")
-    return mask
-
-
-def _as_quads(polygon) -> list:
-    """Normalize Box.polygon into a list of quads (each Nx2)."""
-    if not polygon:
-        return []
-    # Single point list: [[x,y], ...]
-    first = polygon[0]
-    if first and not isinstance(first[0], (list, tuple)):
-        return [polygon]
-    # List of quads
-    return list(polygon)
-
-
-def polygons_to_mask(
-    shape_hw: Tuple[int, int],
-    polygons: Sequence,
-) -> np.ndarray:
-    """Rasterize polygons into a binary mask (255 = inpaint)."""
-    h, w = shape_hw
-    mask = np.zeros((h, w), dtype=np.uint8)
-    for poly in polygons:
-        for quad in _as_quads(poly):
-            pts = np.array(quad, dtype=np.int32)
-            if pts.ndim == 2 and pts.shape[0] >= 3:
-                cv2.fillPoly(mask, [pts], 255)
-    return mask
-
-
-def boxes_to_mask(shape_hw: Tuple[int, int], boxes) -> np.ndarray:
-    polys = []
-    for b in boxes:
-        poly = b.polygon if hasattr(b, "polygon") else b["polygon"]
-        polys.append(poly)
-    return polygons_to_mask(shape_hw, polys)
