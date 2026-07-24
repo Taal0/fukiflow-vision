@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Set, Tuple
 
-import cv2
 import numpy as np
 
+from vision.masks import (
+    as_bbox,
+    erode_mask,
+    polygon_mask,
+    ring_band,
+    ring_is_uniform,
+    ring_median,
+)
 from vision.types import Bubble, EditorRegion
 
 _cleaner: Optional["CleanService"] = None
@@ -49,6 +56,7 @@ class CleanService:
         self,
         img_rgb: np.ndarray,
         bubbles: Sequence[Bubble],
+        force_editor: Optional[Set[int]] = None,
     ) -> Tuple[np.ndarray, List[EditorRegion], str]:
         if img_rgb.ndim != 3 or img_rgb.shape[2] != 3:
             raise ValueError(f"expected HxWx3 RGB, got shape {img_rgb.shape}")
@@ -58,6 +66,7 @@ class CleanService:
         if not bubbles:
             return out, editor_regions, "ok"
 
+        force = force_editor or set()
         h, w = img_rgb.shape[:2]
         inset_px = max(0, int(self.inset))
         ring_px = max(1, int(self.ring))
@@ -65,42 +74,34 @@ class CleanService:
         frac_need = float(self.uniform_frac)
         min_ring = int(self.min_ring_px)
 
-        inset_kernel = None
-        if inset_px > 0:
-            ik = 2 * inset_px + 1
-            inset_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ik, ik))
-
-        rk = 2 * ring_px + 1
-        ring_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (rk, rk))
-
         for b in bubbles:
-            bbox = _as_editor_region(b.bbox)
-            poly_mask = _polygon_mask((h, w), b.polygon, bbox)
+            bbox = as_bbox(b.bbox)
+            if int(b.id) in force:
+                editor_regions.append(bbox)
+                continue
+
+            poly_mask = polygon_mask((h, w), b.polygon, bbox)
             if not poly_mask.any():
                 editor_regions.append(bbox)
                 continue
 
-            if inset_kernel is not None:
-                fill_mask = cv2.erode(poly_mask, inset_kernel)
-            else:
-                fill_mask = poly_mask
-
+            fill_mask = erode_mask(poly_mask, inset_px)
             if not fill_mask.any():
                 editor_regions.append(bbox)
                 continue
 
-            eroded_inner = cv2.erode(fill_mask, ring_kernel)
-            ring_band = (fill_mask > 0) & (eroded_inner == 0)
-            ring_count = int(ring_band.sum())
+            band = ring_band(fill_mask, ring_px)
+            ring_count = int(band.sum())
             if ring_count < min_ring:
                 editor_regions.append(bbox)
                 continue
 
-            samples = out[ring_band].astype(np.float32)
-            med = np.median(samples, axis=0)
-            within = (np.abs(samples - med) <= tol).all(axis=1)
-            frac = float(within.mean())
-            if frac < frac_need:
+            med = ring_median(out, band)
+            if med is None:
+                editor_regions.append(bbox)
+                continue
+
+            if not ring_is_uniform(out, band, med, tol=tol, frac=frac_need):
                 editor_regions.append(bbox)
                 continue
 
@@ -113,35 +114,3 @@ class CleanService:
 
         status = "partial" if editor_regions else "ok"
         return out, editor_regions, status
-
-
-def _as_editor_region(bbox: Sequence[int]) -> EditorRegion:
-    x1, y1, x2, y2 = (int(v) for v in bbox)
-    return (x1, y1, x2, y2)
-
-
-def _polygon_mask(
-    shape: Tuple[int, int],
-    polygon: Sequence[Sequence[float]],
-    bbox: EditorRegion,
-) -> np.ndarray:
-    """Rasterize bubble polygon; fall back to bbox if polygon is too short."""
-    h, w = shape
-    mask = np.zeros((h, w), dtype=np.uint8)
-    pts: List[List[float]] = []
-    for p in polygon or []:
-        if p is None or len(p) < 2:
-            continue
-        pts.append([float(p[0]), float(p[1])])
-
-    if len(pts) >= 3:
-        arr = np.asarray(pts, dtype=np.int32).reshape(-1, 1, 2)
-        cv2.fillPoly(mask, [arr], 1)
-        return mask
-
-    x1, y1, x2, y2 = bbox
-    x1, y1 = max(0, x1), max(0, y1)
-    x2, y2 = min(w, x2), min(h, y2)
-    if x2 > x1 and y2 > y1:
-        mask[y1:y2, x1:x2] = 1
-    return mask

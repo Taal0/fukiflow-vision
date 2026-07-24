@@ -5,9 +5,11 @@ import uuid
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from vision.bubble.detect import get_detector
+from vision.bubble.ink_filter import classify, settings_from_app
 
 from ..images import decode_image_b64, decode_image_bytes
 from ..schemas import BubblesResponse
+from ..settings import get_settings
 
 router = APIRouter(prefix="/v1", tags=["bubbles"])
 
@@ -30,7 +32,9 @@ async def detect_bubbles(
         raise HTTPException(400, f"Invalid image: {e}") from e
 
     detector = get_detector()
-    bubbles = detector.predict(img)
+    raw = detector.predict(img)
+    ink_settings = settings_from_app(get_settings())
+    bubbles, _force_editor = classify(img, raw, ink_settings)
     return BubblesResponse(
         page_id=page_id or str(uuid.uuid4()),
         width=int(img.shape[1]),
