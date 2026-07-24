@@ -32,29 +32,6 @@ if len(data["bubbles"]) > 8:
     print(f"  ... +{len(data['bubbles'])-8} more")
 PY
 
-echo "== ocr =="
-python3 - <<'PY' "$OUT/bubbles.json" "$OUT/ocr_bubbles.json"
-import json, sys
-from pathlib import Path
-data = json.loads(Path(sys.argv[1]).read_text())
-Path(sys.argv[2]).write_text(json.dumps(data["bubbles"]), encoding="utf-8")
-print(f"wrote {sys.argv[2]} ({len(data['bubbles'])} bubbles)")
-PY
-curl -sf -X POST "$HOST/v1/ocr" \
-  -F "file=@${IMG}" \
-  -F "bubbles_json=$(cat "$OUT/ocr_bubbles.json")" \
-  -o "$OUT/ocr.json"
-python3 - <<'PY' "$OUT/ocr.json"
-import json, sys
-from pathlib import Path
-data = json.loads(Path(sys.argv[1]).read_text())
-print(f"bubbles={len(data['bubbles'])}")
-for i, b in enumerate(data["bubbles"][:8]):
-    print(f"  [{i}] text={b.get('text_ja')!r}")
-if len(data["bubbles"]) > 8:
-    print(f"  ... +{len(data['bubbles'])-8} more")
-PY
-
 echo "== pipeline =="
 curl -sf -X POST "$HOST/v1/pipeline" \
   -F "file=@${IMG}" \

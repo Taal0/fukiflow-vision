@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batch process manga pages via the local vision API (bubbles → ocr → clean).
+"""Batch process manga pages via the local vision API (bubbles → clean).
 
 Usage:
   python scripts/batch_clean.py
@@ -15,11 +15,8 @@ Default output (folder input): sibling ``<name>-translated v<N>`` with N = max e
 Writes per page:
   <stem>-orig.<ext>   copy of the source
   <stem>.png           cleaned result
-  <stem>-detect.png    original + YOLO polygons (labels match ocr.json n)
-  <stem>-bubbles.json  bubbles + text_ja + clean/editor_regions
-
-Plus run-level:
-  ocr.json             { "<page_stem>": [{"n": 1, "text": "..."}, ...], ... }
+  <stem>-detect.png    original + YOLO polygons (1-based labels)
+  <stem>-bubbles.json  bubbles + clean/editor_regions
 
 On name collision, writes *-overwritten / *-overwritten-N instead of overwriting.
 Stdlib only (no pip deps) so it can run against a remote API from another machine.
@@ -27,7 +24,6 @@ Stdlib only (no pip deps) so it can run against a remote API from another machin
 
 from __future__ import annotations
 
-import atexit
 import base64
 import json
 import mimetypes
@@ -167,11 +163,11 @@ def check_health() -> None:
     if not isinstance(data, dict) or data.get("status") != "ok":
         raise SystemExit(f"error: service not ready: {data}")
     models = data.get("models") or {}
-    if not models.get("bubble") or not models.get("ocr"):
+    if not models.get("bubble"):
         raise SystemExit(f"error: models not loaded: {data}")
 
 
-def process_one(src: Path, out_dir: Path) -> list[dict[str, Any]]:
+def process_one(src: Path, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     orig_dest = unique_path(out_dir / f"{src.stem}-orig{src.suffix}")
@@ -184,7 +180,12 @@ def process_one(src: Path, out_dir: Path) -> list[dict[str, Any]]:
     img_bytes = src.read_bytes()
     mime = mimetypes.guess_type(src.name)[0] or "application/octet-stream"
 
-    body, ctype = _multipart({"file": (src.name, img_bytes, mime)})
+    body, ctype = _multipart(
+        {
+            "file": (src.name, img_bytes, mime),
+            "page_id": src.stem,
+        }
+    )
     payload = http_json("POST", f"{HOST}/v1/pipeline", body=body, content_type=ctype)
     if not isinstance(payload, dict) or "bubbles" not in payload:
         raise RuntimeError("pipeline response missing bubbles")
@@ -216,12 +217,6 @@ def process_one(src: Path, out_dir: Path) -> list[dict[str, Any]]:
         encoding="utf-8",
     )
 
-    ocr_entries = [
-        {"n": i + 1, "text": b.get("text_ja")}
-        for i, b in enumerate(bubbles)
-        if isinstance(b, dict)
-    ]
-
     clean_flag = payload.get("clean", "ok")
     print(
         f"OK  {src.name}  bubbles={len(bubbles)}  clean={clean_flag}  "
@@ -229,19 +224,6 @@ def process_one(src: Path, out_dir: Path) -> list[dict[str, Any]]:
         f"orig→{orig_dest.name}  clean→{clean_dest.name}  "
         f"detect→{detect_dest.name}  json→{bubbles_dest.name}"
     )
-    return ocr_entries
-
-
-def write_ocr_json(out_dir: Path, ocr_by_page: dict[str, list[dict[str, Any]]]) -> None:
-    if not ocr_by_page:
-        return
-    out_dir.mkdir(parents=True, exist_ok=True)
-    dest = out_dir / "ocr.json"
-    dest.write_text(
-        json.dumps(ocr_by_page, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    print(f"ocr.json → {dest}  ({len(ocr_by_page)} page(s))")
 
 
 def main(argv: list[str]) -> int:
@@ -283,30 +265,15 @@ def main(argv: list[str]) -> int:
     check_health()
     print("health=ok")
 
-    ocr_by_page: dict[str, list[dict[str, Any]]] = {}
-    ocr_written = False
-
-    def _flush_ocr() -> None:
-        nonlocal ocr_written
-        if ocr_written or not ocr_by_page:
-            return
-        write_ocr_json(out_dir, ocr_by_page)
-        ocr_written = True
-
-    atexit.register(_flush_ocr)
-
     ok = 0
     failed: list[str] = []
-    try:
-        for img in images:
-            try:
-                ocr_by_page[img.stem] = process_one(img, out_dir)
-                ok += 1
-            except Exception as e:
-                print(f"FAIL  {img.name}: {e}", file=sys.stderr)
-                failed.append(img.name)
-    finally:
-        _flush_ocr()
+    for img in images:
+        try:
+            process_one(img, out_dir)
+            ok += 1
+        except Exception as e:
+            print(f"FAIL  {img.name}: {e}", file=sys.stderr)
+            failed.append(img.name)
 
     print(f"done: ok={ok} fail={len(failed)} → {out_dir}")
     if failed:

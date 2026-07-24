@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -13,12 +13,10 @@ EditorRegion = BBox  # skipped clean region [x1, y1, x2, y2]
 
 
 class Bubble(BaseModel):
-    """One speech bubble from YOLO-seg (+ optional OCR fields)."""
+    """One speech bubble from YOLO-seg."""
 
     id: int
     polygon: List[Point] = Field(..., description="Mask contour [[x,y], ...] in image coords")
     bbox: BBox = Field(..., description="Axis-aligned [x1, y1, x2, y2]")
     confidence: float = 0.0
     cls: int = 0
-    text_ja: Optional[str] = None
-    ocr_confidence: Optional[float] = None

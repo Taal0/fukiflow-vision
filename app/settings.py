@@ -34,12 +34,6 @@ class Settings:
         self.bubble_conf = float(os.environ.get("BUBBLE_CONF", "0.5"))
         self.bubble_imgsz = int(os.environ.get("BUBBLE_IMGSZ", "640"))
 
-        # Local dir if present; otherwise treat as Hugging Face hub id.
-        ocr_raw = os.environ.get("OCR_MODEL", "models/ocr/manga-ocr-base")
-        ocr_candidate = Path(ocr_raw) if Path(ocr_raw).is_absolute() else (root / ocr_raw)
-        self.ocr_model = str(ocr_candidate.resolve()) if ocr_candidate.exists() else ocr_raw
-        self.ocr_crop_pad = int(os.environ.get("OCR_CROP_PAD", "4"))
-
         # 3px left outline ink; 8 cleared it (v11); +2 keeps fill off art that clips bubbles.
         self.clean_inset = int(os.environ.get("CLEAN_INSET", "10"))
         self.clean_ring = int(os.environ.get("CLEAN_RING", "6"))

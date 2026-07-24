@@ -14,13 +14,6 @@ class BubblesResponse(BaseModel):
     bubbles: List[Bubble]
 
 
-class OcrResponse(BaseModel):
-    page_id: Optional[str] = None
-    width: int
-    height: int
-    bubbles: List[Bubble]
-
-
 class CleanResponse(BaseModel):
     page_id: Optional[str] = None
     cleaned_image: str = Field(..., description="Base64-encoded PNG after inset-fill clean")

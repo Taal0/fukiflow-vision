@@ -1,6 +1,10 @@
 # FukiFlow Vision
 
-Stateless FastAPI service for manga **bubble detect** (YOLO-seg) + **manga-ocr** + **inset-fill clean**. Bridges translators and editors/letterers — not a full translation pipeline.
+Stateless FastAPI service for manga **bubble detect** (YOLO-seg) + **inset-fill clean**.
+Bridges translators and editors/letterers — not a full translation pipeline.
+
+> OCR (manga-ocr) was parked 2026-07-24 — code snapshot:
+> `fukiflow/backend-source-repos/fukiflow-vision-ocr/`.
 
 ## Setup
 
@@ -12,7 +16,6 @@ pip install -r requirements.txt
 
 # Models (not in git) — under MODELS_DIR / models/:
 #   bubble/yolov8n-seg-bubble-v1.pt — YOLO-seg (API default)
-#   ocr/manga-ocr-base/            — manga-ocr (OCR_MODEL; else HF hub id)
 cp .env.example .env
 uvicorn app.main:app --host 0.0.0.0 --port 8001
 ```
@@ -21,11 +24,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8001
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/health` | `{status, device, models:{bubble,ocr}}` |
+| GET | `/health` | `{status, device, models:{bubble,clean}}` |
 | POST | `/v1/bubbles` | multipart `file` → `{page_id, width, height, bubbles[]}` |
-| POST | `/v1/ocr` | page + `bubbles_json` → bubbles with `text_ja` |
 | POST | `/v1/clean` | page + `bubbles_json` → cleaned PNG + `editor_regions` + `clean` (`ok`/`partial`) |
-| POST | `/v1/pipeline` | bubbles → ocr → inset-fill clean in one call |
+| POST | `/v1/pipeline` | bubbles → inset-fill clean in one call |
 
 ## Smoke test
 
@@ -37,7 +39,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8001
 
 Requires the API running. Does **not** modify the input. No args → default test manga folder; folder output is a versioned sibling `*-translated v<N>`.
 
-Per page: original copy (`*-orig.*`), cleaned PNG, detect overlay (`*-detect.png`), `*-bubbles.json`. Run-level: `ocr.json`.
+Per page: original copy (`*-orig.*`), cleaned PNG, detect overlay (`*-detect.png`), `*-bubbles.json`.
 
 ```bash
 python scripts/batch_clean.py
@@ -48,8 +50,8 @@ HOST=http://127.0.0.1:8001 python scripts/batch_clean.py ...
 
 ## Layout
 
-- `vision/` — bubble detect + manga-ocr + clean (app-agnostic; orchestration stays in routers)
-- `app/` — FastAPI wrapper (`engine.py` loads bubble + OCR + clean in lifespan)
+- `vision/` — bubble detect + clean (app-agnostic; orchestration stays in routers)
+- `app/` — FastAPI wrapper (`engine.py` loads bubble + clean in lifespan)
 - `models/bubble/` — YOLO-seg weights (`BUBBLE_WEIGHT`)
 
 ## Env
@@ -59,8 +61,6 @@ HOST=http://127.0.0.1:8001 python scripts/batch_clean.py ...
 | `BUBBLE_WEIGHT` | `models/bubble/yolov8n-seg-bubble-v1.pt` | YOLO-seg checkpoint |
 | `BUBBLE_CONF` | `0.5` | same as bubble-yolo `eval.sh` |
 | `BUBBLE_IMGSZ` | `640` | |
-| `OCR_MODEL` | `models/ocr/manga-ocr-base` | local dir if present, else HF hub id |
-| `OCR_CROP_PAD` | `4` | px pad around bubble bbox |
 | `CLEAN_INSET` | `10` | erode polygon before fill (keep outline) |
 | `CLEAN_RING` | `6` | inner-edge band width for uniform sample |
 | `CLEAN_UNIFORM_TOL` | `18` | per-channel abs distance to median |
@@ -70,4 +70,4 @@ HOST=http://127.0.0.1:8001 python scripts/batch_clean.py ...
 
 ## Out of scope (this revision)
 
-SFX class / filter, render, Docker/cloud GPU, auth.
+OCR, SFX class / filter, render, Docker/cloud GPU, auth.

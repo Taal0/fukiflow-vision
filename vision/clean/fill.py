@@ -42,7 +42,7 @@ class CleanService:
         self.ready = False
 
     def load(self) -> None:
-        """No-op: no model weights; keeps the bubble/ocr load() interface."""
+        """No-op: no model weights; keeps the bubble load() interface."""
         self.ready = True
 
     def clean(
