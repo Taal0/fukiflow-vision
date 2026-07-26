@@ -14,10 +14,13 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Models (not in git) — under MODELS_DIR / models/:
-#   bubble/yolov8n-seg-bubble-v2.pt — YOLO-seg (API default; from bubble-500)
+# Models (not in git) — download release models-v2:
+mkdir -p models/bubble models/panel
+gh release download models-v2 -R Taal0/fukiflow-vision -D models/bubble -p 'yolov8n-seg-bubble-*.pt'
+gh release download models-v2 -R Taal0/fukiflow-vision -D models/panel -p 'yolov8n-panel-*.pt'
+#   bubble/yolov8n-seg-bubble-v2.pt — YOLO-seg (API default)
 #   bubble/yolov8n-seg-bubble-v1.pt — rollback
-#   panel/yolov8n-panel-v3.pt — YOLO panel detect
+#   panel/yolov8n-panel-v3.pt — panel detect
 cp .env.example .env
 uvicorn app.main:app --host 0.0.0.0 --port 8001
 ```
