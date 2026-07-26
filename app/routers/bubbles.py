@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from vision.bubble.detect import get_detector
 from vision.bubble.ink_filter import classify, settings_from_app
+from vision.order.service import get_service as get_order_service
 
 from ..images import decode_image_b64, decode_image_bytes
 from ..schemas import BubblesResponse
@@ -35,9 +36,13 @@ async def detect_bubbles(
     raw = detector.predict(img)
     ink_settings = settings_from_app(get_settings())
     bubbles, _force_editor = classify(img, raw, ink_settings)
+    result = get_order_service().order(img, bubbles)
     return BubblesResponse(
         page_id=page_id or str(uuid.uuid4()),
         width=int(img.shape[1]),
         height=int(img.shape[0]),
-        bubbles=bubbles,
+        bubbles=result.bubbles,
+        panels=result.panels,
+        order_confidence=result.order_confidence,
+        needs_review=result.needs_review,
     )

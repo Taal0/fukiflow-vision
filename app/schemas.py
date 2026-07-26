@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
-from vision.types import Bubble
+from vision.types import Bubble, Panel
 
 
 class BubblesResponse(BaseModel):
@@ -12,6 +12,23 @@ class BubblesResponse(BaseModel):
     width: int
     height: int
     bubbles: List[Bubble]
+    panels: List[Panel] = Field(default_factory=list)
+    order_confidence: float = 1.0
+    needs_review: bool = False
+
+
+class OrderResponse(BaseModel):
+    page_id: str
+    width: int
+    height: int
+    bubbles: List[Bubble]
+    panels: List[Panel] = Field(default_factory=list)
+    order_confidence: float = 1.0
+    needs_review: bool = False
+    bubbles_overlay: Optional[str] = Field(
+        None,
+        description="Base64 PNG: panels + bubble reading_order overlay",
+    )
 
 
 class CleanResponse(BaseModel):
@@ -32,10 +49,13 @@ class PipelineResponse(BaseModel):
     width: int
     height: int
     bubbles: List[Bubble]
+    panels: List[Panel] = Field(default_factory=list)
+    order_confidence: float = 1.0
+    needs_review: bool = False
     cleaned_image: str = Field(..., description="Base64 PNG after inset-fill clean")
     bubbles_overlay: str = Field(
         ...,
-        description="Base64 PNG: original with YOLO polygons + 1-based labels",
+        description="Base64 PNG: original with panels + bubble reading_order labels",
     )
     editor_regions: List[Tuple[int, int, int, int]] = Field(default_factory=list)
     clean: str = Field("ok", description="'ok' or 'partial'")

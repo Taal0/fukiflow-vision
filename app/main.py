@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from . import engine as engine_mod
-from .routers import bubbles, clean, health, pipeline
+from .routers import bubbles, clean, health, order, pipeline
 from .settings import get_settings
 
 
@@ -13,24 +13,35 @@ from .settings import get_settings
 async def lifespan(app: FastAPI):
     settings = get_settings()
     detector = engine_mod.create_bubble_detector(settings)
+    panel_detector = engine_mod.create_panel_detector(settings)
+    order_service = engine_mod.create_order_service(
+        settings, panel_detector=panel_detector
+    )
     cleaner = engine_mod.create_clean_service(settings)
     detector.load()
+    panel_detector.load()
+    order_service.load()
     cleaner.load()
     engine_mod.set_detector(detector)
+    engine_mod.set_panel_detector(panel_detector)
+    engine_mod.set_order_service(order_service)
     engine_mod.set_cleaner(cleaner)
     yield
     engine_mod.set_detector(None)
+    engine_mod.set_panel_detector(None)
+    engine_mod.set_order_service(None)
     engine_mod.set_cleaner(None)
 
 
 app = FastAPI(
     title="FukiFlow Vision",
-    version="0.3.0",
-    description="Bubble detect (YOLO-seg) + inset-fill clean.",
+    version="0.4.0",
+    description="Bubble detect + panel detect + RSP reading order + inset-fill clean.",
     lifespan=lifespan,
 )
 
 app.include_router(health.router)
 app.include_router(bubbles.router)
+app.include_router(order.router)
 app.include_router(clean.router)
 app.include_router(pipeline.router)
