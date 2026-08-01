@@ -31,7 +31,7 @@ def get_service() -> "TypesetService":
 
 @dataclass
 class TypesetSettings:
-    font_path: Path = Path("assets/fonts/NotoSans-Regular.ttf")
+    font_path: Path = Path("assets/fonts/BubbleSans-Regular.otf")
     hyphen_dic: Path = Path("assets/hyphen/hyph_tr_TR.dic")
     clean_inset: int = 10
     margin_ratio: float = 0.006  # typographic margin ≈ page_h * ratio

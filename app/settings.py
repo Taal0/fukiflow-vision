@@ -67,8 +67,8 @@ class Settings:
         self.clean_uniform_frac = float(os.environ.get("CLEAN_UNIFORM_FRAC", "0.85"))
         self.clean_min_ring_px = int(os.environ.get("CLEAN_MIN_RING_PX", "30"))
 
-        # Typeset (layout JSON; page-height-relative ladder; OFL placeholder font)
-        font_default = root / "assets" / "fonts" / "NotoSans-Regular.ttf"
+        # Typeset (layout JSON; page-height-relative ladder; Bubble Sans OFL)
+        font_default = root / "assets" / "fonts" / "BubbleSans-Regular.otf"
         font_env = os.environ.get("TYPESET_FONT", str(font_default))
         fp = Path(font_env)
         self.typeset_font = fp if fp.is_absolute() else (root / fp).resolve()
