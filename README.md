@@ -87,7 +87,7 @@ python scripts/measure_typeset.py   # default: ../fukiflow-train/datasets/clean
 # → fixtures/out/typeset_measure.csv  (multi-lobe / hyphen / escalation rates)
 ```
 
-Placeholder font: `assets/fonts/NotoSans-Regular.ttf` (OFL). Override with `TYPESET_FONT`.
+Default font: `assets/fonts/BubbleSans-Regular.otf` (OFL). Override path with `TYPESET_FONT`.
 
 ## Layout
 
@@ -99,7 +99,7 @@ Placeholder font: `assets/fonts/NotoSans-Regular.ttf` (OFL). Override with `TYPE
 - `app/` — FastAPI wrapper (`engine.py` loads bubble + panel + order + clean + typeset)
 - `models/bubble/` — YOLO-seg weights (`BUBBLE_WEIGHT`)
 - `models/panel/` — YOLO panel weights (`PANEL_WEIGHT`)
-- `assets/fonts/` — OFL placeholder font for typeset
+- `assets/fonts/` — Bubble Sans (OFL) for typeset
 
 ## Env
 
@@ -126,7 +126,7 @@ Placeholder font: `assets/fonts/NotoSans-Regular.ttf` (OFL). Override with `TYPE
 | `CLEAN_UNIFORM_TOL` | `18` | per-channel abs distance to median |
 | `CLEAN_UNIFORM_FRAC` | `0.85` | fraction of ring pixels within tol |
 | `CLEAN_MIN_RING_PX` | `30` | skip if inner ring too small |
-| `TYPESET_FONT` | `assets/fonts/NotoSans-Regular.ttf` | OFL placeholder; no metrics baked into code |
+| `TYPESET_FONT` | `assets/fonts/BubbleSans-Regular.otf` | Bubble Sans OFL; no metrics baked into code |
 | `TYPESET_MARGIN_RATIO` | `0.008` | typographic margin = page_h × ratio (on top of clean inset) |
 | `TYPESET_FONT_MIN_RATIO` | `0.008` | ladder floor (× page_h); shrink-to-fit for narrow bubbles |
 | `TYPESET_FONT_MAX_RATIO` | `0.042` | ladder ceiling (× page_h) |
