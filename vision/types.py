@@ -36,3 +36,35 @@ class Bubble(BaseModel):
     reading_order: Optional[int] = None  # 1..N global
     order_source: str = "unordered"  # algo|ai|manual
     order_confidence: float = 0.0
+    clean_status: str = "unknown"  # filled | editor | unknown
+
+
+class TypesetLine(BaseModel):
+    """One hard-broken line inside a bubble text layer."""
+
+    text: str
+    x: float
+    baseline_y: float
+    width: float
+
+
+class BubbleLayout(BaseModel):
+    """Per-bubble typeset result (layout JSON; PNG is debug-only)."""
+
+    bubble_id: int
+    status: str = "ok"  # ok | editor
+    reason: Optional[str] = None  # clean_editor | multi_lobe | no_fit | no_text | empty_mask
+    font_family: Optional[str] = None
+    font_px: Optional[float] = None
+    font_ratio: Optional[float] = None
+    leading_px: Optional[float] = None
+    align: str = "center"
+    lines: List[TypesetLine] = Field(default_factory=list)
+    hyphenated: bool = False
+
+
+class BubbleText(BaseModel):
+    """Human-supplied text for one bubble (fixture until translation layer exists)."""
+
+    bubble_id: int
+    text: str = ""

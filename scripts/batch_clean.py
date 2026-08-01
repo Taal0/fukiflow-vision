@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batch process manga pages via the local vision API (bubbles → clean).
+"""Batch process manga pages via the local vision API (bubbles → clean → typeset).
 
 Usage:
   python scripts/batch_clean.py
@@ -7,16 +7,22 @@ Usage:
   python scripts/batch_clean.py "/path/to/test manga"
   python scripts/batch_clean.py "/path/to/test manga" /path/to/custom-out
   HOST=http://127.0.0.1:8001 python scripts/batch_clean.py ...
+  TEXTS_JSON=/path/to/manga_texts_tr_reading_order.json python scripts/batch_clean.py ...
+  SKIP_TYPESET=1 python scripts/batch_clean.py ...
 
 Does not modify the input. Default input (no args):
   /Users/talo/Desktop/test and result/test manga
 Default output (folder input): sibling ``<name>-translated v<N>`` with N = max existing + 1.
+Default TEXTS_JSON:
+  /Users/talo/Desktop/test and result/extracted/manga_texts_tr_reading_order.json
 
 Writes per page:
-  <stem>-orig.<ext>   copy of the source
-  <stem>.png           cleaned result
-  <stem>-detect.png    original + YOLO polygons (1-based labels)
-  <stem>-bubbles.json  bubbles + clean/editor_regions
+  <stem>-orig.<ext>    copy of the source
+  <stem>.png            cleaned result
+  <stem>-detect.png     original + YOLO polygons (reading_order labels)
+  <stem>-bubbles.json   bubbles + clean/editor_regions
+  <stem>-typeset.json   layout JSON + typeset status/regions
+  <stem>-typeset.png    debug: text on cleaned page (+ editor marks)
 
 On name collision, writes *-overwritten / *-overwritten-N instead of overwriting.
 Stdlib only (no pip deps) so it can run against a remote API from another machine.
@@ -42,6 +48,10 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 HOST = os.environ.get("HOST", "http://127.0.0.1:8001").rstrip("/")
 TIMEOUT = float(os.environ.get("BATCH_TIMEOUT", "600"))
 DEFAULT_INPUT = Path("/Users/talo/Desktop/test and result/test manga")
+DEFAULT_TEXTS_JSON = Path(
+    "/Users/talo/Desktop/test and result/test manga text/manga_texts_tr_reading_order.json"
+)
+SKIP_TYPESET = os.environ.get("SKIP_TYPESET", "").lower() in ("1", "true", "yes")
 _VERSIONED_OUT_RE = re.compile(r"^(.+)-translated v(\d+)$")
 
 
@@ -49,6 +59,8 @@ def usage() -> None:
     print(
         "Usage: batch_clean.py [image-or-folder] [output-folder]\n"
         f"  default input: {DEFAULT_INPUT}\n"
+        f"  TEXTS_JSON={DEFAULT_TEXTS_JSON}\n"
+        "  SKIP_TYPESET=1 to skip layout step\n"
         "  HOST=http://127.0.0.1:8001  (default)",
         file=sys.stderr,
     )
@@ -135,7 +147,12 @@ def _multipart(
     return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
 
-def http_json(method: str, url: str, body: bytes | None = None, content_type: str | None = None) -> Any:
+def http_json(
+    method: str,
+    url: str,
+    body: bytes | None = None,
+    content_type: str | None = None,
+) -> Any:
     headers = {}
     if content_type:
         headers["Content-Type"] = content_type
@@ -154,7 +171,7 @@ def http_json(method: str, url: str, body: bytes | None = None, content_type: st
         raise RuntimeError(f"request failed {url}: {e.reason}") from e
 
 
-def check_health() -> None:
+def check_health(*, need_typeset: bool) -> None:
     url = f"{HOST}/health"
     try:
         data = http_json("GET", url)
@@ -165,9 +182,83 @@ def check_health() -> None:
     models = data.get("models") or {}
     if not models.get("bubble"):
         raise SystemExit(f"error: models not loaded: {data}")
+    if need_typeset and not models.get("typeset"):
+        raise SystemExit(f"error: typeset service not loaded: {data}")
 
 
-def process_one(src: Path, out_dir: Path) -> None:
+def load_texts_bundle(path: Path | None) -> dict[str, Any] | None:
+    """Load manga_texts_tr_reading_order.json (or compatible)."""
+    if path is None:
+        return None
+    if not path.is_file():
+        raise SystemExit(f"error: TEXTS_JSON not found: {path}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise SystemExit("error: TEXTS_JSON must be a JSON object")
+    by_page = data.get("typeset_by_page") or {}
+    pages: dict[str, dict] = {}
+    for pg in data.get("pages") or []:
+        if not isinstance(pg, dict):
+            continue
+        fname = pg.get("file") or ""
+        stem = Path(str(fname)).stem if fname else f"page_{pg.get('page')}"
+        if stem:
+            pages[stem] = pg
+    return {"typeset_by_page": by_page, "pages": pages, "path": str(path)}
+
+
+def resolve_texts(
+    bundle: dict[str, Any] | None,
+    stem: str,
+    bubbles: list[dict],
+) -> tuple[list[dict[str, Any]], str]:
+    """Return (texts_json entries, how they were resolved)."""
+    if bundle is None:
+        return [], "none"
+
+    raw = list(bundle.get("typeset_by_page", {}).get(stem) or [])
+    bubble_ids = {int(b["id"]) for b in bubbles if "id" in b}
+    matched = [
+        {"bubble_id": int(t["bubble_id"]), "text": str(t.get("text") or "")}
+        for t in raw
+        if "bubble_id" in t and int(t["bubble_id"]) in bubble_ids
+    ]
+    if matched:
+        return matched, "bubble_id"
+
+    # Detect ids drifted vs the texts file → pair by reading_order.
+    page = (bundle.get("pages") or {}).get(stem)
+    if not page:
+        return matched, "missing"
+
+    page_texts = sorted(
+        (page.get("texts") or []),
+        key=lambda t: (t.get("reading_order") is None, t.get("reading_order") or 0),
+    )
+    ordered_bubbles = sorted(
+        [b for b in bubbles if b.get("reading_order") is not None],
+        key=lambda b: b["reading_order"],
+    )
+    out: list[dict[str, Any]] = []
+    for b, t in zip(ordered_bubbles, page_texts):
+        out.append(
+            {
+                "bubble_id": int(b["id"]),
+                "text": str(t.get("text") or ""),
+            }
+        )
+    if out:
+        return out, "reading_order"
+    return [], "empty"
+
+
+def process_one(
+    src: Path,
+    out_dir: Path,
+    *,
+    texts_bundle: dict[str, Any] | None,
+    do_typeset: bool,
+) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     orig_dest = unique_path(out_dir / f"{src.stem}-orig{src.suffix}")
@@ -218,11 +309,64 @@ def process_one(src: Path, out_dir: Path) -> None:
     )
 
     clean_flag = payload.get("clean", "ok")
+    typeset_note = ""
+
+    if do_typeset:
+        texts, how = resolve_texts(texts_bundle, src.stem, bubbles)
+        typeset_dest = unique_path(out_dir / f"{src.stem}-typeset.json")
+        typeset_png_dest = unique_path(out_dir / f"{src.stem}-typeset.png")
+
+        tbody, tctype = _multipart(
+            {
+                "file": (clean_dest.name, cleaned, "image/png"),
+                "bubbles_json": json.dumps(bubbles, ensure_ascii=False),
+                "texts_json": json.dumps(texts, ensure_ascii=False),
+                "page_id": src.stem,
+                "include_debug": "true",
+            }
+        )
+        tpayload = http_json(
+            "POST", f"{HOST}/v1/typeset", body=tbody, content_type=tctype
+        )
+        if not isinstance(tpayload, dict) or "layouts" not in tpayload:
+            raise RuntimeError("typeset response missing layouts")
+
+        if tpayload.get("debug_image"):
+            typeset_png_dest.write_bytes(base64.b64decode(tpayload["debug_image"]))
+
+        layouts = tpayload.get("layouts") or []
+        n_ok = sum(1 for L in layouts if L.get("status") == "ok")
+        n_ed = sum(1 for L in layouts if L.get("status") == "editor")
+        typeset_dest.write_text(
+            json.dumps(
+                {
+                    "page_id": tpayload.get("page_id"),
+                    "width": tpayload.get("width"),
+                    "height": tpayload.get("height"),
+                    "typeset": tpayload.get("typeset", "ok"),
+                    "typeset_regions": tpayload.get("typeset_regions") or [],
+                    "texts_resolve": how,
+                    "texts": texts,
+                    "layouts": layouts,
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        typeset_note = (
+            f"  typeset={tpayload.get('typeset')} ok={n_ok} editor={n_ed} "
+            f"texts={len(texts)}({how})  "
+            f"typeset→{typeset_dest.name}  preview→{typeset_png_dest.name}"
+        )
+
     print(
         f"OK  {src.name}  bubbles={len(bubbles)}  clean={clean_flag}  "
         f"editor={len(editor_regions)}  "
         f"orig→{orig_dest.name}  clean→{clean_dest.name}  "
         f"detect→{detect_dest.name}  json→{bubbles_dest.name}"
+        f"{typeset_note}"
     )
 
 
@@ -259,17 +403,38 @@ def main(argv: list[str]) -> int:
         print("error: output folder must differ from input folder", file=sys.stderr)
         return 1
 
+    do_typeset = not SKIP_TYPESET
+    texts_path: Path | None = None
+    texts_bundle: dict[str, Any] | None = None
+    if do_typeset:
+        env_texts = os.environ.get("TEXTS_JSON", "").strip()
+        texts_path = (
+            Path(env_texts).expanduser().resolve()
+            if env_texts
+            else DEFAULT_TEXTS_JSON.expanduser().resolve()
+        )
+        texts_bundle = load_texts_bundle(texts_path)
+
     print(f"host={HOST}")
     print(f"input={src}  ({len(images)} image(s))")
     print(f"output={out_dir}")
-    check_health()
+    if do_typeset:
+        print(f"texts={texts_path}")
+    else:
+        print("typeset=skipped")
+    check_health(need_typeset=do_typeset)
     print("health=ok")
 
     ok = 0
     failed: list[str] = []
     for img in images:
         try:
-            process_one(img, out_dir)
+            process_one(
+                img,
+                out_dir,
+                texts_bundle=texts_bundle,
+                do_typeset=do_typeset,
+            )
             ok += 1
         except Exception as e:
             print(f"FAIL  {img.name}: {e}", file=sys.stderr)

@@ -47,20 +47,21 @@ async def clean(
     except Exception as e:
         raise HTTPException(400, f"Invalid bubbles_json: {e}") from e
 
-    cleaned, editor_regions, status = get_cleaner().clean(img, bubbles)
+    outcome = get_cleaner().clean(img, bubbles)
 
     if as_base64:
         return CleanResponse(
             page_id=page_id,
-            cleaned_image=encode_png_b64(cleaned),
-            editor_regions=editor_regions,
-            clean=status,
+            cleaned_image=encode_png_b64(outcome.image),
+            editor_regions=outcome.editor_regions,
+            clean=outcome.status,
         )
     return Response(
-        content=encode_png_bytes(cleaned),
+        content=encode_png_bytes(outcome.image),
         media_type="image/png",
         headers={
-            "X-Clean": status,
-            "X-Editor-Regions": json.dumps(editor_regions),
+            "X-Clean": outcome.status,
+            "X-Editor-Regions": json.dumps(outcome.editor_regions),
+            "X-Editor-Bubble-Ids": json.dumps(outcome.editor_bubble_ids),
         },
     )

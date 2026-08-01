@@ -6,6 +6,7 @@ from vision.bubble.detect import get_detector
 from vision.clean.fill import get_cleaner
 from vision.order.service import get_service as get_order_service
 from vision.panel.detect import get_detector as get_panel_detector
+from vision.typeset.service import get_service as get_typeset_service
 
 from ..schemas import HealthResponse
 from ..settings import get_settings
@@ -20,6 +21,7 @@ async def health() -> HealthResponse:
     panel_ok = False
     order_ok = False
     clean_ok = False
+    typeset_ok = False
     try:
         bubble_ok = get_detector().ready
     except RuntimeError:
@@ -36,6 +38,10 @@ async def health() -> HealthResponse:
         clean_ok = get_cleaner().ready
     except RuntimeError:
         pass
+    try:
+        typeset_ok = get_typeset_service().ready
+    except RuntimeError:
+        pass
     return HealthResponse(
         status="ok",
         device=settings.device,
@@ -44,5 +50,6 @@ async def health() -> HealthResponse:
             "panel": panel_ok,
             "order": order_ok,
             "clean": clean_ok,
+            "typeset": typeset_ok,
         },
     )

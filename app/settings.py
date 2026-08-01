@@ -60,11 +60,53 @@ class Settings:
         self.ink_min_cc_area = int(os.environ.get("INK_MIN_CC_AREA", "12"))
 
         # 3px left outline ink; 8 cleared it (v11); +2 keeps fill off art that clips bubbles.
+        # Authoritative default is 10 (not the older "3 px" note).
         self.clean_inset = int(os.environ.get("CLEAN_INSET", "10"))
         self.clean_ring = int(os.environ.get("CLEAN_RING", "6"))
         self.clean_uniform_tol = float(os.environ.get("CLEAN_UNIFORM_TOL", "18"))
         self.clean_uniform_frac = float(os.environ.get("CLEAN_UNIFORM_FRAC", "0.85"))
         self.clean_min_ring_px = int(os.environ.get("CLEAN_MIN_RING_PX", "30"))
+
+        # Typeset (layout JSON; page-height-relative ladder; OFL placeholder font)
+        font_default = root / "assets" / "fonts" / "NotoSans-Regular.ttf"
+        font_env = os.environ.get("TYPESET_FONT", str(font_default))
+        fp = Path(font_env)
+        self.typeset_font = fp if fp.is_absolute() else (root / fp).resolve()
+        self.typeset_margin_ratio = float(os.environ.get("TYPESET_MARGIN_RATIO", "0.006"))
+        # Per-balloon margin cap: margin_px ≤ min(balloon_w, balloon_h) × ratio.
+        # Prevents over-erosion of narrow bubbles where page-height margin eats
+        # into the available area. 0.20 keeps 60% of a 63px-wide balloon intact.
+        self.typeset_margin_cap_ratio = float(
+            os.environ.get("TYPESET_MARGIN_CAP_RATIO", "0.20")
+        )
+        # Floor low enough for narrow manga bubbles (~10px on 1686h pages).
+        # Binary search still picks the largest size that fits.
+        self.typeset_font_min_ratio = float(
+            os.environ.get("TYPESET_FONT_MIN_RATIO", "0.006")
+        )
+        self.typeset_font_max_ratio = float(
+            os.environ.get("TYPESET_FONT_MAX_RATIO", "0.042")
+        )
+        self.typeset_font_steps = int(os.environ.get("TYPESET_FONT_STEPS", "16"))
+        self.typeset_leading = float(os.environ.get("TYPESET_LEADING", "1.15"))
+        self.typeset_width_safety = float(
+            os.environ.get("TYPESET_WIDTH_SAFETY", "0.98")
+        )
+        # Secondary CC must be ≥ this fraction of the primary to escalate as
+        # multi_lobe. Speech-tail residue after erode is typically well below.
+        self.typeset_multi_lobe_min_area_ratio = float(
+            os.environ.get("TYPESET_MULTI_LOBE_MIN_AREA_RATIO", "0.20")
+        )
+        self.typeset_hyphenate = os.environ.get("TYPESET_HYPHENATE", "1").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self.typeset_hyphen_lang = os.environ.get("TYPESET_HYPHEN_LANG", "tr_TR")
+        hyphen_default = root / "assets" / "hyphen" / "hyph_tr_TR.dic"
+        hyphen_env = os.environ.get("TYPESET_HYPHEN_DIC", str(hyphen_default))
+        hp = Path(hyphen_env)
+        self.typeset_hyphen_dic = hp if hp.is_absolute() else (root / hp).resolve()
 
         self.verbose = os.environ.get("VERBOSE", "").lower() in ("1", "true", "yes")
         os.environ.setdefault("MODELS_DIR", str(self.models_dir))

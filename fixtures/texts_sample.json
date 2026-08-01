@@ -1,0 +1,12 @@
+[
+  {"bubble_id": 0, "text": "Ne oluyor burada?"},
+  {"bubble_id": 1, "text": "Hiçbir şey anlamıyorum."},
+  {"bubble_id": 2, "text": "Bekle… Şunu bir daha söyle."},
+  {"bubble_id": 3, "text": "Bu kadar hızlı olamaz!"},
+  {"bubble_id": 4, "text": "Gidelim. Zamanımız kalmadı."},
+  {"bubble_id": 5, "text": "Sen gerçekten bunu mu düşünüyorsun?"},
+  {"bubble_id": 6, "text": "Özür dilerim. Yanıldım."},
+  {"bubble_id": 7, "text": "Konuşamayız mı artık?"},
+  {"bubble_id": 8, "text": "Çekil önümden!"},
+  {"bubble_id": 9, "text": "Yarın görüşürüz o zaman."}
+]

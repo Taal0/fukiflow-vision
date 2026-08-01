@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Set, Tuple
+from dataclasses import dataclass, field
+from typing import List, Optional, Sequence, Set
 
 import numpy as np
 
@@ -28,6 +29,17 @@ def get_cleaner() -> "CleanService":
     if _cleaner is None:
         raise RuntimeError("CleanService not initialized")
     return _cleaner
+
+
+@dataclass
+class CleanOutcome:
+    """Result of inset-fill clean (mirrors OrderResult shape)."""
+
+    image: np.ndarray
+    bubbles: List[Bubble]
+    editor_regions: List[EditorRegion] = field(default_factory=list)
+    status: str = "ok"  # ok | partial
+    editor_bubble_ids: List[int] = field(default_factory=list)
 
 
 class CleanService:
@@ -57,14 +69,17 @@ class CleanService:
         img_rgb: np.ndarray,
         bubbles: Sequence[Bubble],
         force_editor: Optional[Set[int]] = None,
-    ) -> Tuple[np.ndarray, List[EditorRegion], str]:
+    ) -> CleanOutcome:
         if img_rgb.ndim != 3 or img_rgb.shape[2] != 3:
             raise ValueError(f"expected HxWx3 RGB, got shape {img_rgb.shape}")
 
         out = img_rgb.copy()
         editor_regions: List[EditorRegion] = []
+        editor_ids: List[int] = []
+        stamped: List[Bubble] = []
+
         if not bubbles:
-            return out, editor_regions, "ok"
+            return CleanOutcome(image=out, bubbles=[], status="ok")
 
         force = force_editor or set()
         h, w = img_rgb.shape[:2]
@@ -76,41 +91,51 @@ class CleanService:
 
         for b in bubbles:
             bbox = as_bbox(b.bbox)
+            skip = False
+
             if int(b.id) in force:
-                editor_regions.append(bbox)
-                continue
+                skip = True
+            else:
+                poly_mask = polygon_mask((h, w), b.polygon, bbox)
+                if not poly_mask.any():
+                    skip = True
+                else:
+                    fill_mask = erode_mask(poly_mask, inset_px)
+                    if not fill_mask.any():
+                        skip = True
+                    else:
+                        band = ring_band(fill_mask, ring_px)
+                        ring_count = int(band.sum())
+                        if ring_count < min_ring:
+                            skip = True
+                        else:
+                            med = ring_median(out, band)
+                            if med is None:
+                                skip = True
+                            elif not ring_is_uniform(
+                                out, band, med, tol=tol, frac=frac_need
+                            ):
+                                skip = True
+                            else:
+                                color = (
+                                    int(np.clip(round(float(med[0])), 0, 255)),
+                                    int(np.clip(round(float(med[1])), 0, 255)),
+                                    int(np.clip(round(float(med[2])), 0, 255)),
+                                )
+                                out[fill_mask > 0] = color
 
-            poly_mask = polygon_mask((h, w), b.polygon, bbox)
-            if not poly_mask.any():
+            if skip:
                 editor_regions.append(bbox)
-                continue
-
-            fill_mask = erode_mask(poly_mask, inset_px)
-            if not fill_mask.any():
-                editor_regions.append(bbox)
-                continue
-
-            band = ring_band(fill_mask, ring_px)
-            ring_count = int(band.sum())
-            if ring_count < min_ring:
-                editor_regions.append(bbox)
-                continue
-
-            med = ring_median(out, band)
-            if med is None:
-                editor_regions.append(bbox)
-                continue
-
-            if not ring_is_uniform(out, band, med, tol=tol, frac=frac_need):
-                editor_regions.append(bbox)
-                continue
-
-            color = (
-                int(np.clip(round(float(med[0])), 0, 255)),
-                int(np.clip(round(float(med[1])), 0, 255)),
-                int(np.clip(round(float(med[2])), 0, 255)),
-            )
-            out[fill_mask > 0] = color
+                editor_ids.append(int(b.id))
+                stamped.append(b.model_copy(update={"clean_status": "editor"}))
+            else:
+                stamped.append(b.model_copy(update={"clean_status": "filled"}))
 
         status = "partial" if editor_regions else "ok"
-        return out, editor_regions, status
+        return CleanOutcome(
+            image=out,
+            bubbles=stamped,
+            editor_regions=editor_regions,
+            status=status,
+            editor_bubble_ids=editor_ids,
+        )

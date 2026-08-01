@@ -1,4 +1,4 @@
-"""Model holders for FastAPI lifespan (bubble + panel + order + clean)."""
+"""Model holders for FastAPI lifespan (bubble + panel + order + clean + typeset)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,12 @@ from vision.panel.detect import (
     PanelDetector,
     get_detector as get_panel_detector,
     set_detector as set_panel_detector,
+)
+from vision.typeset.service import (
+    TypesetService,
+    TypesetSettings,
+    get_service as get_typeset_service,
+    set_service as set_typeset_service,
 )
 
 from .settings import Settings, get_settings
@@ -70,15 +76,38 @@ def create_clean_service(settings: Optional[Settings] = None) -> CleanService:
     )
 
 
+def create_typeset_service(settings: Optional[Settings] = None) -> TypesetService:
+    s = settings or get_settings()
+    return TypesetService(
+        settings=TypesetSettings(
+            font_path=s.typeset_font,
+            clean_inset=s.clean_inset,
+            margin_ratio=s.typeset_margin_ratio,
+            margin_cap_ratio=s.typeset_margin_cap_ratio,
+            multi_lobe_min_area_ratio=s.typeset_multi_lobe_min_area_ratio,
+            font_min_ratio=s.typeset_font_min_ratio,
+            font_max_ratio=s.typeset_font_max_ratio,
+            font_steps=s.typeset_font_steps,
+            leading=s.typeset_leading,
+            width_safety=s.typeset_width_safety,
+            hyphenate=s.typeset_hyphenate,
+            hyphen_lang=s.typeset_hyphen_lang,
+            hyphen_dic=s.typeset_hyphen_dic,
+        )
+    )
+
+
 __all__ = [
     "BubbleDetector",
     "PanelDetector",
     "OrderService",
     "CleanService",
+    "TypesetService",
     "create_bubble_detector",
     "create_panel_detector",
     "create_order_service",
     "create_clean_service",
+    "create_typeset_service",
     "get_detector",
     "set_detector",
     "get_panel_detector",
@@ -87,4 +116,6 @@ __all__ = [
     "set_order_service",
     "get_cleaner",
     "set_cleaner",
+    "get_typeset_service",
+    "set_typeset_service",
 ]

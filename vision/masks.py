@@ -135,13 +135,37 @@ def dark_mask(
 
 def connected_component_stats(mask: np.ndarray) -> Tuple[int, int]:
     """Return (cc_count, max_cc_area) for non-zero 8-connected components."""
-    if not mask.any():
+    areas = component_areas(mask)
+    if not areas:
         return 0, 0
+    return int(len(areas)), int(areas[0])
+
+
+def component_areas(mask: np.ndarray) -> List[int]:
+    """Areas of non-background 8-connected components, descending."""
+    if not mask.any():
+        return []
     n, _labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     if n <= 1:
-        return 0, 0
+        return []
+    areas = [int(a) for a in stats[1:, cv2.CC_STAT_AREA]]
+    areas.sort(reverse=True)
+    return areas
+
+
+def keep_largest_component(mask: np.ndarray) -> np.ndarray:
+    """Zero out all but the largest 8-connected component."""
+    if not mask.any():
+        return mask
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if n <= 2:
+        # 0 = background, 1 = sole foreground component
+        return mask
     areas = stats[1:, cv2.CC_STAT_AREA]
-    return int(len(areas)), int(areas.max())
+    keep_label = int(1 + int(np.argmax(areas)))
+    out = np.zeros_like(mask)
+    out[labels == keep_label] = 1
+    return out
 
 
 def ink_structure(

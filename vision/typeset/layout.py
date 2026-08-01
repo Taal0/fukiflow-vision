@@ -1,0 +1,191 @@
+"""Font-fit ladder + vertical window iteration for one bubble."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Optional, Sequence, Tuple
+
+import numpy as np
+
+from vision.types import BubbleLayout, TypesetLine
+from vision.typeset.font import FontFace
+from vision.typeset.profile import WidthProfile, band_min_width
+from vision.typeset.wrap import Hyphenator, wrap_lines
+
+
+@dataclass(frozen=True)
+class FitSettings:
+    leading: float = 1.15
+    width_safety: float = 0.98
+    max_iters: int = 3
+    align: str = "center"
+
+
+def font_ladder(
+    page_h: int,
+    *,
+    min_ratio: float,
+    max_ratio: float,
+    steps: int,
+) -> List[float]:
+    """Page-height-relative font sizes, ascending."""
+    steps = max(1, int(steps))
+    lo = float(min_ratio) * float(page_h)
+    hi = float(max_ratio) * float(page_h)
+    if steps == 1:
+        return [hi]
+    return [float(v) for v in np.linspace(lo, hi, steps)]
+
+
+def _line_bands(
+    cy: float,
+    n: int,
+    lh: float,
+) -> List[Tuple[float, float]]:
+    """Vertical bands for N lines centered on cy: [(y_top, y_bot), ...]."""
+    block_h = n * lh
+    y0 = cy - block_h / 2.0
+    return [(y0 + i * lh, y0 + (i + 1) * lh) for i in range(n)]
+
+
+def _place_lines(
+    texts: Sequence[str],
+    bands: Sequence[Tuple[float, float]],
+    widths_meta: Sequence[Tuple[float, float, float]],
+    *,
+    font: FontFace,
+    size_px: float,
+    align: str,
+) -> List[TypesetLine]:
+    """Compute x / baseline_y for wrapped lines (center or left within band)."""
+    m = font.metrics(size_px)
+    out: List[TypesetLine] = []
+    for text, (y_top, y_bot), (usable, x_left, x_right) in zip(
+        texts, bands, widths_meta
+    ):
+        tw = font.measure(text, size_px)
+        if align == "left":
+            x = x_left
+        else:
+            # center within the usable interval
+            x = 0.5 * (x_left + x_right) - 0.5 * tw
+        baseline = y_top + (y_bot - y_top) * (m.ascent / m.em_height) if m.em_height else y_top
+        out.append(
+            TypesetLine(
+                text=text,
+                x=float(x),
+                baseline_y=float(baseline),
+                width=float(tw),
+            )
+        )
+    return out
+
+
+def try_fit_size(
+    text: str,
+    profile: WidthProfile,
+    font: FontFace,
+    size_px: float,
+    *,
+    settings: FitSettings,
+    hyphenator: Optional[Hyphenator] = None,
+) -> Optional[Tuple[List[TypesetLine], bool, float]]:
+    """Try one font size. Returns (lines, hyphenated, leading_px) or None."""
+    if profile.empty or not text.strip():
+        return None
+
+    lh = font.line_height(size_px, settings.leading)
+    if lh <= 0:
+        return None
+
+    # Initial N from available vertical span.
+    span = max(1, profile.y1 - profile.y0)
+    n = max(1, int(span / lh))
+    measure = lambda s, sz=size_px: font.measure(s, sz)
+
+    for _ in range(settings.max_iters):
+        bands = _line_bands(profile.cy, n, lh)
+        widths: List[float] = []
+        metas: List[Tuple[float, float, float]] = []
+        for y_top, y_bot in bands:
+            usable, x_left, x_right = band_min_width(
+                profile, y_top, y_bot, safety=settings.width_safety
+            )
+            widths.append(usable)
+            metas.append((usable, x_left, x_right))
+
+        wrapped, hyphenated = wrap_lines(
+            text, widths, measure, hyphenator=hyphenator
+        )
+        if wrapped is None:
+            return None
+        n_prime = len(wrapped)
+        if n_prime == 0:
+            return [], False, lh
+        if n_prime == n:
+            # Recompute metas for the settled bands (same n).
+            lines = _place_lines(
+                wrapped, bands, metas, font=font, size_px=size_px, align=settings.align
+            )
+            return lines, hyphenated, lh
+        n = n_prime
+
+    # Did not settle within max_iters → treat as no-fit at this size.
+    return None
+
+
+def fit_bubble(
+    text: str,
+    profile: WidthProfile,
+    font: FontFace,
+    ladder: Sequence[float],
+    page_h: int,
+    *,
+    bubble_id: int,
+    settings: Optional[FitSettings] = None,
+    hyphenator: Optional[Hyphenator] = None,
+) -> BubbleLayout:
+    """Binary-search the ladder for the largest size that fits."""
+    settings = settings or FitSettings()
+    text = text.strip()
+    if not text:
+        return BubbleLayout(bubble_id=bubble_id, status="editor", reason="no_text")
+    if profile.empty:
+        return BubbleLayout(bubble_id=bubble_id, status="editor", reason="empty_mask")
+    if profile.multi_lobe:
+        return BubbleLayout(bubble_id=bubble_id, status="editor", reason="multi_lobe")
+
+    sizes = sorted(float(s) for s in ladder)
+    if not sizes:
+        return BubbleLayout(bubble_id=bubble_id, status="editor", reason="no_fit")
+
+    best: Optional[Tuple[float, List[TypesetLine], bool, float]] = None
+    lo, hi = 0, len(sizes) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        size = sizes[mid]
+        fitted = try_fit_size(
+            text, profile, font, size, settings=settings, hyphenator=hyphenator
+        )
+        if fitted is None:
+            hi = mid - 1
+        else:
+            lines, hyphenated, lh = fitted
+            best = (size, lines, hyphenated, lh)
+            lo = mid + 1
+
+    if best is None:
+        return BubbleLayout(bubble_id=bubble_id, status="editor", reason="no_fit")
+
+    size, lines, hyphenated, lh = best
+    return BubbleLayout(
+        bubble_id=bubble_id,
+        status="ok",
+        font_family=font.family,
+        font_px=float(size),
+        font_ratio=float(size) / float(page_h) if page_h else None,
+        leading_px=float(lh),
+        align=settings.align,
+        lines=lines,
+        hyphenated=hyphenated,
+    )

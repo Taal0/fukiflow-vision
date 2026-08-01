@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
-from vision.types import Bubble, Panel
+from vision.types import Bubble, BubbleLayout, Panel
 
 
 class BubblesResponse(BaseModel):
@@ -59,6 +59,25 @@ class PipelineResponse(BaseModel):
     )
     editor_regions: List[Tuple[int, int, int, int]] = Field(default_factory=list)
     clean: str = Field("ok", description="'ok' or 'partial'")
+
+
+class TypesetResponse(BaseModel):
+    page_id: Optional[str] = None
+    width: int
+    height: int
+    typeset: str = Field(
+        "ok",
+        description="'ok' if all bubbles laid out; 'partial' if any escalated",
+    )
+    typeset_regions: List[Tuple[int, int, int, int]] = Field(
+        default_factory=list,
+        description="BBoxes escalated (clean_editor / multi_lobe / no_fit / no_text)",
+    )
+    layouts: List[BubbleLayout] = Field(default_factory=list)
+    debug_image: Optional[str] = Field(
+        None,
+        description="Optional base64 PNG with text painted + editor marks",
+    )
 
 
 class HealthResponse(BaseModel):

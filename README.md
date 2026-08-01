@@ -1,6 +1,6 @@
 # FukiFlow Vision
 
-Stateless FastAPI service for manga **bubble detect** (YOLO-seg) + **ink filter** + **panel detect** + **RSP reading order** + **inset-fill clean**.
+Stateless FastAPI service for manga **bubble detect** (YOLO-seg) + **ink filter** + **panel detect** + **RSP reading order** + **inset-fill clean** + **typeset** (layout JSON).
 Bridges translators and editors/letterers — not a full translation pipeline.
 
 > OCR (manga-ocr) was parked 2026-07-24 — code snapshot:
@@ -29,11 +29,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 8001
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/health` | `{status, device, models:{bubble,panel,order,clean}}` |
+| GET | `/health` | `{status, device, models:{bubble,panel,order,clean,typeset}}` |
 | POST | `/v1/bubbles` | multipart `file` → bubbles + panels + reading_order (ink DROP applied) |
 | POST | `/v1/order` | detect → ink_filter → RSP order (+ optional overlay) |
 | POST | `/v1/clean` | page + `bubbles_json` → cleaned PNG + `editor_regions` + `clean` (`ok`/`partial`) |
 | POST | `/v1/pipeline` | bubbles → ink_filter → order → inset-fill clean in one call |
+| POST | `/v1/typeset` | cleaned page + `bubbles_json` + `texts_json` → layout JSON (+ optional debug PNG) |
 
 `/v1/bubbles` and `/v1/pipeline` include `panels[]`, `order_confidence`, and `needs_review` by default.
 
@@ -47,12 +48,18 @@ uvicorn app.main:app --host 0.0.0.0 --port 8001
 
 Requires the API running. Does **not** modify the input. No args → default test manga folder; folder output is a versioned sibling `*-translated v<N>`.
 
-Per page: original copy (`*-orig.*`), cleaned PNG, detect overlay (`*-detect.png`), `*-bubbles.json`.
+Pipeline per page: detect → order → clean → **typeset**. Default TR texts:
+`/Users/talo/Desktop/test and result/extracted/manga_texts_tr_reading_order.json`
+(`typeset_by_page`; bubble_id mismatch → reading_order remap).
+
+Per page: `*-orig.*`, cleaned PNG, `*-detect.png`, `*-bubbles.json`, `*-typeset.json`, `*-typeset.png`.
 
 ```bash
 python scripts/batch_clean.py
 python scripts/batch_clean.py "/path/to/test manga"
 python scripts/batch_clean.py path/to/page.png
+TEXTS_JSON=/path/to/manga_texts_tr_reading_order.json python scripts/batch_clean.py ...
+SKIP_TYPESET=1 python scripts/batch_clean.py ...   # clean-only
 HOST=http://127.0.0.1:8001 python scripts/batch_clean.py ...
 ```
 
@@ -73,15 +80,26 @@ python scripts/measure_ink.py "/path/to/test manga"
 # → fixtures/out/ink_measure.csv
 ```
 
+## Typeset measurement (optional)
+
+```bash
+python scripts/measure_typeset.py   # default: ../fukiflow-train/datasets/clean
+# → fixtures/out/typeset_measure.csv  (multi-lobe / hyphen / escalation rates)
+```
+
+Placeholder font: `assets/fonts/NotoSans-Regular.ttf` (OFL). Override with `TYPESET_FONT`.
+
 ## Layout
 
-- `vision/` — bubble detect + ink_filter + panel detect + order + clean (app-agnostic)
+- `vision/` — bubble detect + ink_filter + panel detect + order + clean + typeset (app-agnostic)
 - `vision/panel/` — YOLO panel detector (bbox-only)
 - `vision/order/` — RSP panel/bubble ordering, IoB assignment, ambiguity score
+- `vision/typeset/` — width profile, wrap/hyphen, font-fit ladder, layout JSON
 - `vision/masks.py` — shared polygon / ring / ink helpers
-- `app/` — FastAPI wrapper (`engine.py` loads bubble + panel + order + clean in lifespan)
+- `app/` — FastAPI wrapper (`engine.py` loads bubble + panel + order + clean + typeset)
 - `models/bubble/` — YOLO-seg weights (`BUBBLE_WEIGHT`)
 - `models/panel/` — YOLO panel weights (`PANEL_WEIGHT`)
+- `assets/fonts/` — OFL placeholder font for typeset
 
 ## Env
 
@@ -108,8 +126,18 @@ python scripts/measure_ink.py "/path/to/test manga"
 | `CLEAN_UNIFORM_TOL` | `18` | per-channel abs distance to median |
 | `CLEAN_UNIFORM_FRAC` | `0.85` | fraction of ring pixels within tol |
 | `CLEAN_MIN_RING_PX` | `30` | skip if inner ring too small |
+| `TYPESET_FONT` | `assets/fonts/NotoSans-Regular.ttf` | OFL placeholder; no metrics baked into code |
+| `TYPESET_MARGIN_RATIO` | `0.008` | typographic margin = page_h × ratio (on top of clean inset) |
+| `TYPESET_FONT_MIN_RATIO` | `0.008` | ladder floor (× page_h); shrink-to-fit for narrow bubbles |
+| `TYPESET_FONT_MAX_RATIO` | `0.042` | ladder ceiling (× page_h) |
+| `TYPESET_FONT_STEPS` | `16` | ladder steps |
+| `TYPESET_LEADING` | `1.15` | × (ascent+descent) |
+| `TYPESET_WIDTH_SAFETY` | `0.98` | shrink usable line width |
+| `TYPESET_HYPHENATE` | `1` | pyphen hyphen fallback |
+| `TYPESET_HYPHEN_LANG` | `tr_TR` | unused when dic file set |
+| `TYPESET_HYPHEN_DIC` | `assets/hyphen/hyph_tr_TR.dic` | LPPL Turkish patterns (pyphen has no `tr`) |
 | `DEVICE` | auto | `cpu` / `mps` / `cuda` |
 
 ## Out of scope (this revision)
 
-OCR, AI rerank (only `needs_review` flag), panel polygon/seg, double-page spread, SFX class / filter, render, Docker/cloud GPU, auth.
+OCR, AI rerank (only `needs_review` flag), panel polygon/seg, double-page spread, SFX class / filter, Photoshop/IDML export, auto multi-lobe split, Docker/cloud GPU, auth.

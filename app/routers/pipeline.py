@@ -40,21 +40,21 @@ async def pipeline(
     bubbles, force_editor = classify(img, raw, ink_settings)
     result = get_order_service().order(img, bubbles)
     pid = page_id or str(uuid.uuid4())
-    cleaned, editor_regions, status = get_cleaner().clean(
+    outcome = get_cleaner().clean(
         img, result.bubbles, force_editor=force_editor
     )
-    overlay = draw_bubbles(img, result.bubbles, panels=result.panels)
+    overlay = draw_bubbles(img, outcome.bubbles, panels=result.panels)
 
     return PipelineResponse(
         page_id=pid,
         width=int(img.shape[1]),
         height=int(img.shape[0]),
-        bubbles=result.bubbles,
+        bubbles=outcome.bubbles,
         panels=result.panels,
         order_confidence=result.order_confidence,
         needs_review=result.needs_review,
-        cleaned_image=encode_png_b64(cleaned),
+        cleaned_image=encode_png_b64(outcome.image),
         bubbles_overlay=encode_png_b64(overlay),
-        editor_regions=editor_regions,
-        clean=status,
+        editor_regions=outcome.editor_regions,
+        clean=outcome.status,
     )
