@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
+from vision.document import Layer
 from vision.types import Bubble, BubbleLayout, Panel
 
 
@@ -42,6 +43,10 @@ class CleanResponse(BaseModel):
         "ok",
         description="'ok' if all bubbles filled; 'partial' if any skipped",
     )
+    clean_layers: List[Layer] = Field(
+        default_factory=list,
+        description="Present when include_layers=true",
+    )
 
 
 class PipelineResponse(BaseModel):
@@ -59,6 +64,10 @@ class PipelineResponse(BaseModel):
     )
     editor_regions: List[Tuple[int, int, int, int]] = Field(default_factory=list)
     clean: str = Field("ok", description="'ok' or 'partial'")
+    clean_layers: List[Layer] = Field(
+        default_factory=list,
+        description="Present when include_layers=true",
+    )
 
 
 class TypesetResponse(BaseModel):
@@ -74,6 +83,10 @@ class TypesetResponse(BaseModel):
         description="BBoxes escalated (clean_editor / multi_lobe / no_fit / no_text)",
     )
     layouts: List[BubbleLayout] = Field(default_factory=list)
+    text_layers: List[Layer] = Field(
+        default_factory=list,
+        description="Present when include_layers=true",
+    )
     debug_image: Optional[str] = Field(
         None,
         description="Optional base64 PNG with text painted + editor marks",

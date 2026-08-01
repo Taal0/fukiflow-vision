@@ -32,9 +32,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8001
 | GET | `/health` | `{status, device, models:{bubble,panel,order,clean,typeset}}` |
 | POST | `/v1/bubbles` | multipart `file` → bubbles + panels + reading_order (ink DROP applied) |
 | POST | `/v1/order` | detect → ink_filter → RSP order (+ optional overlay) |
-| POST | `/v1/clean` | page + `bubbles_json` → cleaned PNG + `editor_regions` + `clean` (`ok`/`partial`) |
-| POST | `/v1/pipeline` | bubbles → ink_filter → order → inset-fill clean in one call |
-| POST | `/v1/typeset` | cleaned page + `bubbles_json` + `texts_json` → layout JSON (+ optional debug PNG) |
+| POST | `/v1/clean` | page + `bubbles_json` → cleaned PNG + `editor_regions` + `clean` (`ok`/`partial`); `include_layers` → `clean_layers` |
+| POST | `/v1/pipeline` | bubbles → ink_filter → order → inset-fill clean in one call; `include_layers` → `clean_layers` |
+| POST | `/v1/typeset` | cleaned page + `bubbles_json` + `texts_json` → layout JSON (+ optional debug PNG / `text_layers`) |
+| POST | `/v1/compose` | original + `doc_json` (PageDoc) → preview PNG (`--off` via form `off`) |
 
 `/v1/bubbles` and `/v1/pipeline` include `panels[]`, `order_confidence`, and `needs_review` by default.
 
@@ -52,7 +53,7 @@ Pipeline per page: detect → order → clean → **typeset**. Default TR texts:
 `/Users/talo/Desktop/test and result/extracted/manga_texts_tr_reading_order.json`
 (`typeset_by_page`; bubble_id mismatch → reading_order remap).
 
-Per page: `*-orig.*`, cleaned PNG, `*-detect.png`, `*-bubbles.json`, `*-typeset.json`, `*-typeset.png`.
+Each page writes to `<out>/<stem>/` with all images, JSON, and optional `<stem>-layers/`.
 
 ```bash
 python scripts/batch_clean.py
@@ -60,8 +61,16 @@ python scripts/batch_clean.py "/path/to/test manga"
 python scripts/batch_clean.py path/to/page.png
 TEXTS_JSON=/path/to/manga_texts_tr_reading_order.json python scripts/batch_clean.py ...
 SKIP_TYPESET=1 python scripts/batch_clean.py ...   # clean-only
+EXPORT_RASTER=1 python scripts/batch_clean.py ...  # also <stem>-layers/*.png
 HOST=http://127.0.0.1:8001 python scripts/batch_clean.py ...
+
+# Recompose / toggle layers without re-running the pipeline
+python scripts/compose_doc.py out/page-doc.json
+python scripts/compose_doc.py out/page-doc.json --off cln_3,txt_7
+python scripts/compose_doc.py out/page-doc.json --only-kind clean
 ```
+
+Layer / export model: [`docs/export-contract.md`](docs/export-contract.md).
 
 ## Reading-order eval (optional)
 

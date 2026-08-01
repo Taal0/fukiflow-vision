@@ -11,7 +11,12 @@ import numpy as np
 from vision.masks import as_bbox
 from vision.types import Bubble, BubbleLayout, BubbleText, EditorRegion
 from vision.typeset.font import FontFace
-from vision.typeset.layout import FitSettings, fit_bubble, font_ladder
+from vision.typeset.layout import (
+    FitSettings,
+    enrich_layout_export,
+    fit_bubble,
+    font_ladder,
+)
 from vision.typeset.profile import WidthProfile, build_width_profile
 from vision.typeset.wrap import Hyphenator, pyphen_hyphenator
 
@@ -48,6 +53,7 @@ class TypesetSettings:
     hyphenate: bool = True
     hyphen_lang: str = "tr_TR"
     align: str = "center"
+    dpi: float = 350.0  # PAGE_DPI; used for font_pt / leading_pt export fields
 
 
 @dataclass
@@ -167,6 +173,8 @@ class TypesetService:
                 settings=fit,
                 hyphenator=self._hyphenator,
             )
+            if lay.status == "ok":
+                lay = enrich_layout_export(lay, self.font, dpi=float(s.dpi))
             layouts.append(lay)
             if lay.status == "editor":
                 regions.append(as_bbox(b.bbox))

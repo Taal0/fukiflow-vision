@@ -5,6 +5,7 @@ from typing import List
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from vision.layers.build import text_layers
 from vision.types import Bubble, BubbleText
 from vision.typeset.draw import draw_typeset
 from vision.typeset.service import get_service as get_typeset_service
@@ -38,8 +39,9 @@ async def typeset(
     texts_json: str = Form(...),
     page_id: str | None = Form(None),
     include_debug: bool = Form(False),
+    include_layers: bool = Form(False),
 ) -> TypesetResponse:
-    """Layout JSON for cleaned bubbles + texts. Optional debug PNG."""
+    """Layout JSON for cleaned bubbles + texts. Optional debug PNG / text layers."""
     if file is None and not image_b64:
         raise HTTPException(400, "Provide multipart `file` or form field `image_b64`")
 
@@ -70,6 +72,8 @@ async def typeset(
         )
         debug_b64 = encode_png_b64(debug)
 
+    layers = text_layers(result.layouts, bubbles) if include_layers else []
+
     return TypesetResponse(
         page_id=page_id,
         width=int(img.shape[1]),
@@ -77,5 +81,6 @@ async def typeset(
         typeset=result.status,
         typeset_regions=result.typeset_regions,
         layouts=result.layouts,
+        text_layers=layers,
         debug_image=debug_b64,
     )

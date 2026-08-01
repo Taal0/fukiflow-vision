@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence, Set
+from typing import List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -15,7 +15,7 @@ from vision.masks import (
     ring_is_uniform,
     ring_median,
 )
-from vision.types import Bubble, EditorRegion
+from vision.types import BBox, Bubble, EditorRegion, Point
 
 _cleaner: Optional["CleanService"] = None
 
@@ -32,6 +32,17 @@ def get_cleaner() -> "CleanService":
 
 
 @dataclass
+class CleanFill:
+    """One successful inset-fill (parametric; enough to rebuild a clean layer)."""
+
+    bubble_id: int
+    bbox: BBox
+    color: Tuple[int, int, int]
+    inset: int
+    polygon: List[Point]
+
+
+@dataclass
 class CleanOutcome:
     """Result of inset-fill clean (mirrors OrderResult shape)."""
 
@@ -40,6 +51,7 @@ class CleanOutcome:
     editor_regions: List[EditorRegion] = field(default_factory=list)
     status: str = "ok"  # ok | partial
     editor_bubble_ids: List[int] = field(default_factory=list)
+    fills: List[CleanFill] = field(default_factory=list)
 
 
 class CleanService:
@@ -77,6 +89,7 @@ class CleanService:
         editor_regions: List[EditorRegion] = []
         editor_ids: List[int] = []
         stamped: List[Bubble] = []
+        fills: List[CleanFill] = []
 
         if not bubbles:
             return CleanOutcome(image=out, bubbles=[], status="ok")
@@ -123,6 +136,19 @@ class CleanService:
                                     int(np.clip(round(float(med[2])), 0, 255)),
                                 )
                                 out[fill_mask > 0] = color
+                                fills.append(
+                                    CleanFill(
+                                        bubble_id=int(b.id),
+                                        bbox=bbox,
+                                        color=color,
+                                        inset=inset_px,
+                                        polygon=[
+                                            [float(p[0]), float(p[1])]
+                                            for p in (b.polygon or [])
+                                            if p is not None and len(p) >= 2
+                                        ],
+                                    )
+                                )
 
             if skip:
                 editor_regions.append(bbox)
@@ -138,4 +164,5 @@ class CleanService:
             editor_regions=editor_regions,
             status=status,
             editor_bubble_ids=editor_ids,
+            fills=fills,
         )

@@ -93,6 +93,7 @@ def create_typeset_service(settings: Optional[Settings] = None) -> TypesetServic
             hyphenate=s.typeset_hyphenate,
             hyphen_lang=s.typeset_hyphen_lang,
             hyphen_dic=s.typeset_hyphen_dic,
+            dpi=s.page_dpi,
         )
     )
 

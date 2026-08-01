@@ -2,15 +2,65 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from vision.types import BubbleLayout, TypesetLine
+from vision.types import BBox, BubbleLayout, TypesetLine
 from vision.typeset.font import FontFace
 from vision.typeset.profile import WidthProfile, band_min_width
 from vision.typeset.wrap import Hyphenator, wrap_lines
+
+
+def px_to_pt(px: float, dpi: float) -> float:
+    return float(px) * 72.0 / float(dpi) if dpi else float(px)
+
+
+def layout_frame(
+    lines: Sequence[TypesetLine],
+    *,
+    ascent: float,
+    descent: float,
+) -> Optional[BBox]:
+    """Axis-aligned text block from line boxes (IDML text frame)."""
+    if not lines:
+        return None
+    x1 = min(line.x for line in lines)
+    x2 = max(line.x + line.width for line in lines)
+    y1 = min(line.baseline_y - ascent for line in lines)
+    y2 = max(line.baseline_y + descent for line in lines)
+    return (
+        int(math.floor(x1)),
+        int(math.floor(y1)),
+        int(math.ceil(x2)),
+        int(math.ceil(y2)),
+    )
+
+
+def enrich_layout_export(
+    layout: BubbleLayout,
+    font: FontFace,
+    *,
+    dpi: float,
+) -> BubbleLayout:
+    """Attach pt sizes, font file/PS name, and frame for PSD/IDML export."""
+    updates: dict = {
+        "font_file": str(font.path),
+        "font_postscript_name": font.postscript_name,
+        "font_family": layout.font_family or font.family,
+    }
+    if layout.font_px is not None:
+        updates["font_pt"] = px_to_pt(layout.font_px, dpi)
+        m = font.metrics(layout.font_px)
+        if layout.lines:
+            updates["frame"] = layout_frame(
+                layout.lines, ascent=m.ascent, descent=m.descent
+            )
+    if layout.leading_px is not None:
+        updates["leading_pt"] = px_to_pt(layout.leading_px, dpi)
+    return layout.model_copy(update=updates)
 
 
 @dataclass(frozen=True)
@@ -178,6 +228,7 @@ def fit_bubble(
         return BubbleLayout(bubble_id=bubble_id, status="editor", reason="no_fit")
 
     size, lines, hyphenated, lh = best
+    m = font.metrics(size)
     return BubbleLayout(
         bubble_id=bubble_id,
         status="ok",
@@ -185,7 +236,10 @@ def fit_bubble(
         font_px=float(size),
         font_ratio=float(size) / float(page_h) if page_h else None,
         leading_px=float(lh),
+        font_postscript_name=font.postscript_name,
+        font_file=str(font.path),
         align=settings.align,
         lines=lines,
         hyphenated=hyphenated,
+        frame=layout_frame(lines, ascent=m.ascent, descent=m.descent),
     )

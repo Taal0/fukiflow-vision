@@ -30,9 +30,16 @@ class FontFace:
         self.path = Path(path).resolve()
         if not self.path.is_file():
             raise FileNotFoundError(f"font not found: {self.path}")
-        self.family = self.path.stem
         # Probe load so missing/corrupt files fail at init, not mid-typeset.
-        ImageFont.truetype(str(self.path), size=12)
+        probe = ImageFont.truetype(str(self.path), size=12)
+        family, style = probe.getname()
+        self.family = family or self.path.stem
+        # InDesign wants PostScript name; stem matches common OFL naming
+        # (e.g. BubbleSans-Regular). Prefer family-style join when distinct.
+        if style and style.lower() not in {"regular", "normal", ""}:
+            self.postscript_name = f"{self.family}-{style}".replace(" ", "")
+        else:
+            self.postscript_name = self.path.stem
 
     def _font(self, size_px: float) -> ImageFont.FreeTypeFont:
         # PIL sizes are integer; keep subpixel intent via max(1, round).

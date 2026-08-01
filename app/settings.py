@@ -108,6 +108,9 @@ class Settings:
         hp = Path(hyphen_env)
         self.typeset_hyphen_dic = hp if hp.is_absolute() else (root / hp).resolve()
 
+        # Page DPI for pt conversion on layout export fields (PSD/IDML).
+        self.page_dpi = float(os.environ.get("PAGE_DPI", "350"))
+
         self.verbose = os.environ.get("VERBOSE", "").lower() in ("1", "true", "yes")
         os.environ.setdefault("MODELS_DIR", str(self.models_dir))
 

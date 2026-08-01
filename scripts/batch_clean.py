@@ -16,16 +16,22 @@ Default output (folder input): sibling ``<name>-translated v<N>`` with N = max e
 Default TEXTS_JSON:
   /Users/talo/Desktop/test and result/extracted/manga_texts_tr_reading_order.json
 
-Writes per page:
+Writes per page (each in <out>/<stem>/):
   <stem>-orig.<ext>    copy of the source
   <stem>.png            cleaned result
   <stem>-detect.png     original + YOLO polygons (reading_order labels)
   <stem>-bubbles.json   bubbles + clean/editor_regions
   <stem>-typeset.json   layout JSON + typeset status/regions
   <stem>-typeset.png    debug: text on cleaned page (+ editor marks)
+  <stem>-doc.json       PageDoc (source + layers; compose via compose_doc.py)
+  <stem>-compose.png    full composed preview (when EXPORT_RASTER=1)
+  <stem>-layers/        RGBA per layer (when EXPORT_RASTER=1)
+
+Also writes to <out>/ (gallery view):
+  <stem>.png            final compose (copy from page folder, when EXPORT_RASTER=1)
 
 On name collision, writes *-overwritten / *-overwritten-N instead of overwriting.
-Stdlib only (no pip deps) so it can run against a remote API from another machine.
+HTTP path is stdlib-only. EXPORT_RASTER shells out to compose_doc.py (needs vision deps).
 """
 
 from __future__ import annotations
@@ -36,6 +42,7 @@ import mimetypes
 import os
 import re
 import shutil
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -52,6 +59,9 @@ DEFAULT_TEXTS_JSON = Path(
     "/Users/talo/Desktop/test and result/test manga text/manga_texts_tr_reading_order.json"
 )
 SKIP_TYPESET = os.environ.get("SKIP_TYPESET", "").lower() in ("1", "true", "yes")
+EXPORT_RASTER = os.environ.get("EXPORT_RASTER", "").lower() in ("1", "true", "yes")
+PAGE_DPI = float(os.environ.get("PAGE_DPI", "350"))
+_SCRIPT_DIR = Path(__file__).resolve().parent
 _VERSIONED_OUT_RE = re.compile(r"^(.+)-translated v(\d+)$")
 
 
@@ -61,6 +71,7 @@ def usage() -> None:
         f"  default input: {DEFAULT_INPUT}\n"
         f"  TEXTS_JSON={DEFAULT_TEXTS_JSON}\n"
         "  SKIP_TYPESET=1 to skip layout step\n"
+        "  EXPORT_RASTER=1 to write <stem>-layers/*.png via compose_doc.py\n"
         "  HOST=http://127.0.0.1:8001  (default)",
         file=sys.stderr,
     )
@@ -81,25 +92,28 @@ def collect_inputs(src: Path) -> list[Path]:
     return []
 
 
-def next_versioned_out_dir(src: Path) -> Path:
-    """``<parent>/<name>-translated v<N>`` with N = max existing + 1."""
+def next_versioned_out_dir(src: Path, *, suffix: str = "translated") -> Path:
+    """``<parent>/<name>-<suffix> v<N>`` with N = max existing + 1."""
     parent = src.parent
     base = src.name
+    pattern = re.compile(rf"^{re.escape(base)}-{re.escape(suffix)} v(\d+)$")
     max_n = 0
     for child in parent.iterdir():
         if not child.is_dir():
             continue
-        m = _VERSIONED_OUT_RE.match(child.name)
-        if not m or m.group(1) != base:
+        m = pattern.match(child.name)
+        if not m:
             continue
-        max_n = max(max_n, int(m.group(2)))
-    return parent / f"{base}-translated v{max_n + 1}"
+        max_n = max(max_n, int(m.group(1)))
+    return parent / f"{base}-{suffix} v{max_n + 1}"
 
 
-def default_out_dir(src: Path) -> Path:
+def default_out_dir(src: Path, *, with_layers: bool = False) -> Path:
     if src.is_dir():
-        return next_versioned_out_dir(src)
-    return src.parent / f"{src.stem}-translated"
+        suffix = "layers" if with_layers else "translated"
+        return next_versioned_out_dir(src, suffix=suffix)
+    suffix = "-layers" if with_layers else "-translated"
+    return src.parent / f"{src.stem}{suffix}"
 
 
 def unique_path(path: Path) -> Path:
@@ -259,12 +273,14 @@ def process_one(
     texts_bundle: dict[str, Any] | None,
     do_typeset: bool,
 ) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
+    # Each page gets its own subfolder: out/<stem>/
+    page_dir = out_dir / src.stem
+    page_dir.mkdir(parents=True, exist_ok=True)
 
-    orig_dest = unique_path(out_dir / f"{src.stem}-orig{src.suffix}")
-    clean_dest = unique_path(out_dir / f"{src.stem}.png")
-    detect_dest = unique_path(out_dir / f"{src.stem}-detect.png")
-    bubbles_dest = unique_path(out_dir / f"{src.stem}-bubbles.json")
+    orig_dest = unique_path(page_dir / f"{src.stem}-orig{src.suffix}")
+    clean_dest = unique_path(page_dir / f"{src.stem}.png")
+    detect_dest = unique_path(page_dir / f"{src.stem}-detect.png")
+    bubbles_dest = unique_path(page_dir / f"{src.stem}-bubbles.json")
 
     shutil.copy2(src, orig_dest)
 
@@ -275,6 +291,7 @@ def process_one(
         {
             "file": (src.name, img_bytes, mime),
             "page_id": src.stem,
+            "include_layers": "true",
         }
     )
     payload = http_json("POST", f"{HOST}/v1/pipeline", body=body, content_type=ctype)
@@ -291,6 +308,7 @@ def process_one(
 
     bubbles = payload.get("bubbles") or []
     editor_regions = payload.get("editor_regions") or []
+    clean_layers = payload.get("clean_layers") or []
     bubbles_dest.write_text(
         json.dumps(
             {
@@ -310,11 +328,15 @@ def process_one(
 
     clean_flag = payload.get("clean", "ok")
     typeset_note = ""
+    texts: list[dict[str, Any]] = []
+    text_layers: list[dict[str, Any]] = []
+    typeset_status = "skipped"
+    typeset_editor_ids: list[int] = []
 
     if do_typeset:
         texts, how = resolve_texts(texts_bundle, src.stem, bubbles)
-        typeset_dest = unique_path(out_dir / f"{src.stem}-typeset.json")
-        typeset_png_dest = unique_path(out_dir / f"{src.stem}-typeset.png")
+        typeset_dest = unique_path(page_dir / f"{src.stem}-typeset.json")
+        typeset_png_dest = unique_path(page_dir / f"{src.stem}-typeset.png")
 
         tbody, tctype = _multipart(
             {
@@ -323,6 +345,7 @@ def process_one(
                 "texts_json": json.dumps(texts, ensure_ascii=False),
                 "page_id": src.stem,
                 "include_debug": "true",
+                "include_layers": "true",
             }
         )
         tpayload = http_json(
@@ -335,6 +358,13 @@ def process_one(
             typeset_png_dest.write_bytes(base64.b64decode(tpayload["debug_image"]))
 
         layouts = tpayload.get("layouts") or []
+        text_layers = tpayload.get("text_layers") or []
+        typeset_status = str(tpayload.get("typeset", "ok"))
+        typeset_editor_ids = [
+            int(L["bubble_id"])
+            for L in layouts
+            if L.get("status") == "editor" and "bubble_id" in L
+        ]
         n_ok = sum(1 for L in layouts if L.get("status") == "ok")
         n_ed = sum(1 for L in layouts if L.get("status") == "editor")
         typeset_dest.write_text(
@@ -343,7 +373,7 @@ def process_one(
                     "page_id": tpayload.get("page_id"),
                     "width": tpayload.get("width"),
                     "height": tpayload.get("height"),
-                    "typeset": tpayload.get("typeset", "ok"),
+                    "typeset": typeset_status,
                     "typeset_regions": tpayload.get("typeset_regions") or [],
                     "texts_resolve": how,
                     "texts": texts,
@@ -356,17 +386,73 @@ def process_one(
             encoding="utf-8",
         )
         typeset_note = (
-            f"  typeset={tpayload.get('typeset')} ok={n_ok} editor={n_ed} "
+            f"  typeset={typeset_status} ok={n_ok} editor={n_ed} "
             f"texts={len(texts)}({how})  "
             f"typeset→{typeset_dest.name}  preview→{typeset_png_dest.name}"
         )
 
+    layers = sorted(
+        list(clean_layers) + list(text_layers),
+        key=lambda L: (L.get("z") or 0, L.get("id") or ""),
+    )
+    doc = {
+        "schema_version": 1,
+        "page_id": payload.get("page_id") or src.stem,
+        "source": {
+            "file": orig_dest.name,
+            "width": int(payload.get("width") or 0),
+            "height": int(payload.get("height") or 0),
+            "dpi": PAGE_DPI,
+            "color_mode": "rgb",
+        },
+        "bubbles": bubbles,
+        "texts": texts,
+        "layers": layers,
+        "flags": {
+            "clean": clean_flag,
+            "typeset": typeset_status,
+            "editor_bubble_ids": [
+                int(b["id"])
+                for b in bubbles
+                if b.get("clean_status") == "editor" and "id" in b
+            ],
+            "typeset_editor_bubble_ids": typeset_editor_ids,
+        },
+    }
+    doc_dest = unique_path(page_dir / f"{src.stem}-doc.json")
+    doc_dest.write_text(
+        json.dumps(doc, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    doc_note = f"  doc→{doc_dest.name}"
+
+    raster_note = ""
+    if EXPORT_RASTER:
+        compose_script = _SCRIPT_DIR / "compose_doc.py"
+        if not compose_script.is_file():
+            raise RuntimeError(f"compose_doc.py not found: {compose_script}")
+        proc = subprocess.run(
+            [sys.executable, str(compose_script), str(doc_dest), "--export-layers"],
+            cwd=str(_SCRIPT_DIR.parent),
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"EXPORT_RASTER failed: {proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        raster_note = "  layers→exported"
+
+    # Copy final compose to parent for gallery view
+    compose_in_page = page_dir / f"{src.stem}-compose.png"
+    if compose_in_page.is_file():
+        gallery_dest = out_dir / f"{src.stem}.png"
+        shutil.copy2(compose_in_page, gallery_dest)
+
     print(
-        f"OK  {src.name}  bubbles={len(bubbles)}  clean={clean_flag}  "
-        f"editor={len(editor_regions)}  "
-        f"orig→{orig_dest.name}  clean→{clean_dest.name}  "
-        f"detect→{detect_dest.name}  json→{bubbles_dest.name}"
-        f"{typeset_note}"
+        f"OK  {src.name} → {page_dir.name}/  "
+        f"bubbles={len(bubbles)}  clean={clean_flag}  editor={len(editor_regions)}"
+        f"{typeset_note}{doc_note}{raster_note}"
     )
 
 
@@ -398,7 +484,7 @@ def main(argv: list[str]) -> int:
         print(f"error: no images found in {kind}: {src}", file=sys.stderr)
         return 1
 
-    out_dir = out_override if out_override is not None else default_out_dir(src)
+    out_dir = out_override if out_override is not None else default_out_dir(src, with_layers=EXPORT_RASTER)
     if src.is_dir() and out_dir.resolve() == src.resolve():
         print("error: output folder must differ from input folder", file=sys.stderr)
         return 1
@@ -422,6 +508,8 @@ def main(argv: list[str]) -> int:
         print(f"texts={texts_path}")
     else:
         print("typeset=skipped")
+    if EXPORT_RASTER:
+        print("export_raster=1")
     check_health(need_typeset=do_typeset)
     print("health=ok")
 

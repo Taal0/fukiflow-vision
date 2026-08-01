@@ -49,18 +49,30 @@ class TypesetLine(BaseModel):
 
 
 class BubbleLayout(BaseModel):
-    """Per-bubble typeset result (layout JSON; PNG is debug-only)."""
+    """Per-bubble typeset result (layout JSON; PNG is debug-only).
+
+    Export notes (PSD live text / IDML text frame):
+    - ``lines[]`` are hard breaks with explicit leading; export as hard breaks.
+    - When ``hyphenated`` is True, hyphens are already embedded in ``lines[].text`` —
+      export must disable hyphenation so engines do not re-hyphenate.
+    - Coordinates are pixel, top-left origin, y down (PSD-native; IDML converts to pt).
+    """
 
     bubble_id: int
     status: str = "ok"  # ok | editor
     reason: Optional[str] = None  # clean_editor | multi_lobe | no_fit | no_text | empty_mask
     font_family: Optional[str] = None
     font_px: Optional[float] = None
+    font_pt: Optional[float] = None  # font_px * 72 / dpi
     font_ratio: Optional[float] = None
     leading_px: Optional[float] = None
+    leading_pt: Optional[float] = None  # leading_px * 72 / dpi
+    font_postscript_name: Optional[str] = None
+    font_file: Optional[str] = None
     align: str = "center"
     lines: List[TypesetLine] = Field(default_factory=list)
     hyphenated: bool = False
+    frame: Optional[BBox] = None  # text block rect from line boxes (IDML frame)
 
 
 class BubbleText(BaseModel):

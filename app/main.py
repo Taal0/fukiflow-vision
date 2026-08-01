@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from . import engine as engine_mod
-from .routers import bubbles, clean, health, order, pipeline, typeset
+from .routers import bubbles, clean, compose, health, order, pipeline, typeset
 from .settings import get_settings
 
 
@@ -39,9 +39,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="FukiFlow Vision",
-    version="0.5.0",
+    version="0.6.0",
     description=(
-        "Bubble detect + panel detect + RSP reading order + inset-fill clean + typeset."
+        "Bubble detect + panel detect + RSP reading order + inset-fill clean + "
+        "typeset + composable layers."
     ),
     lifespan=lifespan,
 )
@@ -52,3 +53,4 @@ app.include_router(order.router)
 app.include_router(clean.router)
 app.include_router(pipeline.router)
 app.include_router(typeset.router)
+app.include_router(compose.router)

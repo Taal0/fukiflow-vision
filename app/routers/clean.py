@@ -7,6 +7,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from vision.clean.fill import get_cleaner
+from vision.layers.build import clean_layers
 from vision.types import Bubble
 
 from ..images import decode_image_b64, decode_image_bytes, encode_png_b64, encode_png_bytes
@@ -29,6 +30,7 @@ async def clean(
     bubbles_json: str = Form(...),
     page_id: str | None = Form(None),
     as_base64: bool = Form(False),
+    include_layers: bool = Form(False),
 ):
     """Inset-fill clean from bubble polygons. Returns PNG + editor_regions + status."""
     if file is None and not image_b64:
@@ -48,13 +50,15 @@ async def clean(
         raise HTTPException(400, f"Invalid bubbles_json: {e}") from e
 
     outcome = get_cleaner().clean(img, bubbles)
+    layers = clean_layers(outcome.fills) if include_layers else []
 
-    if as_base64:
+    if as_base64 or include_layers:
         return CleanResponse(
             page_id=page_id,
             cleaned_image=encode_png_b64(outcome.image),
             editor_regions=outcome.editor_regions,
             clean=outcome.status,
+            clean_layers=layers,
         )
     return Response(
         content=encode_png_bytes(outcome.image),
