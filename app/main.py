@@ -12,24 +12,28 @@ from .settings import get_settings
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    detector = engine_mod.create_bubble_detector(settings)
-    panel_detector = engine_mod.create_panel_detector(settings)
-    order_service = engine_mod.create_order_service(
-        settings, panel_detector=panel_detector
-    )
     cleaner = engine_mod.create_clean_service(settings)
     typesetter = engine_mod.create_typeset_service(settings)
-    detector.load()
-    panel_detector.load()
-    order_service.load()
     cleaner.load()
     typesetter.load()
-    engine_mod.set_detector(detector)
-    engine_mod.set_panel_detector(panel_detector)
-    engine_mod.set_order_service(order_service)
     engine_mod.set_cleaner(cleaner)
     engine_mod.set_typeset_service(typesetter)
+
+    if not settings.vision_light:
+        detector = engine_mod.create_bubble_detector(settings)
+        panel_detector = engine_mod.create_panel_detector(settings)
+        order_service = engine_mod.create_order_service(
+            settings, panel_detector=panel_detector
+        )
+        detector.load()
+        panel_detector.load()
+        order_service.load()
+        engine_mod.set_detector(detector)
+        engine_mod.set_panel_detector(panel_detector)
+        engine_mod.set_order_service(order_service)
+
     yield
+
     engine_mod.set_detector(None)
     engine_mod.set_panel_detector(None)
     engine_mod.set_order_service(None)
@@ -39,10 +43,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="FukiFlow Vision",
-    version="0.6.0",
+    version="0.7.0",
     description=(
         "Bubble detect + panel detect + RSP reading order + inset-fill clean + "
-        "typeset + composable layers."
+        "typeset + composable layers. Set VISION_LIGHT=1 to skip YOLO."
     ),
     lifespan=lifespan,
 )

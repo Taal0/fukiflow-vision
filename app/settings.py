@@ -112,6 +112,12 @@ class Settings:
         self.page_dpi = float(os.environ.get("PAGE_DPI", "350"))
 
         self.verbose = os.environ.get("VERBOSE", "").lower() in ("1", "true", "yes")
+        # Skip YOLO bubble/panel load — typeset + compose only (cheap CPU demos).
+        self.vision_light = os.environ.get("VISION_LIGHT", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         os.environ.setdefault("MODELS_DIR", str(self.models_dir))
 
 

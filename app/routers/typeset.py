@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
-from typing import List
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from vision.layers.build import text_layers
 from vision.types import Bubble, BubbleText
+from vision.typeset.catalog import FontInfo, clear_font_catalog, list_fonts, resolve_font_path
 from vision.typeset.draw import draw_typeset
-from vision.typeset.service import get_service as get_typeset_service
 
+from ..engine import get_typeset_service_for_font
 from ..images import decode_image_b64, decode_image_bytes, encode_png_b64
 from ..schemas import TypesetResponse
 from ..settings import get_settings
@@ -31,6 +33,45 @@ def _parse_texts_json(raw: str) -> List[BubbleText]:
     return [BubbleText.model_validate(t) for t in data]
 
 
+def _parse_overrides_json(raw: Optional[str]) -> Optional[Dict]:
+    if raw is None or not str(raw).strip():
+        return None
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError("overrides_json must be a JSON object")
+    return data
+
+
+@router.get("/typeset/fonts", response_model=List[FontInfo])
+async def typeset_fonts(refresh: int = 0) -> List[FontInfo]:
+    """List .ttf/.otf faces under assets/fonts."""
+    if refresh:
+        clear_font_catalog()
+    return list(list_fonts())
+
+
+@router.get("/typeset/fonts/{key}/file")
+async def typeset_font_file(key: str):
+    """Serve a catalog font file for browser FontFace loading."""
+    try:
+        path = resolve_font_path(key)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    media = (
+        "font/otf"
+        if path.suffix.lower() == ".otf"
+        else "font/ttf"
+        if path.suffix.lower() == ".ttf"
+        else "application/octet-stream"
+    )
+    return FileResponse(
+        path,
+        media_type=media,
+        filename=path.name,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @router.post("/typeset", response_model=TypesetResponse)
 async def typeset(
     file: UploadFile | None = File(None),
@@ -40,6 +81,11 @@ async def typeset(
     page_id: str | None = Form(None),
     include_debug: bool = Form(False),
     include_layers: bool = Form(False),
+    font: str | None = Form(None, description="Catalog key or font filename"),
+    overrides_json: str | None = Form(
+        None,
+        description='Per-bubble overrides: {"3": {"font_px": 28, "font_scale": 1.1, "font": "comic_neue"}}',
+    ),
 ) -> TypesetResponse:
     """Layout JSON for cleaned bubbles + texts. Optional debug PNG / text layers."""
     if file is None and not image_b64:
@@ -56,19 +102,30 @@ async def typeset(
     try:
         bubbles = _parse_bubbles_json(bubbles_json)
         texts = _parse_texts_json(texts_json)
+        overrides = _parse_overrides_json(overrides_json)
     except Exception as e:
-        raise HTTPException(400, f"Invalid bubbles_json/texts_json: {e}") from e
+        raise HTTPException(
+            400, f"Invalid bubbles_json/texts_json/overrides_json: {e}"
+        ) from e
 
-    result = get_typeset_service().typeset(img, bubbles, texts)
+    settings = get_settings()
+    font_path = settings.typeset_font
+    if font and str(font).strip():
+        try:
+            font_path = resolve_font_path(font, default=settings.typeset_font)
+        except FileNotFoundError as e:
+            raise HTTPException(400, str(e)) from e
+
+    svc = get_typeset_service_for_font(str(font_path))
+    result = svc.typeset(img, bubbles, texts, overrides=overrides)
 
     debug_b64 = None
     if include_debug:
-        settings = get_settings()
         debug = draw_typeset(
             img,
             result.layouts,
             bubbles,
-            font_path=str(settings.typeset_font),
+            font_path=str(font_path),
         )
         debug_b64 = encode_png_b64(debug)
 

@@ -23,6 +23,9 @@ gh release download models-v2 -R Taal0/fukiflow-vision -D models/panel -p 'yolov
 #   panel/yolov8n-panel-v3.pt — panel detect
 cp .env.example .env
 uvicorn app.main:app --host 0.0.0.0 --port 8001
+
+# Demo / letterer UI (typeset + compose only, no YOLO weights):
+VISION_LIGHT=1 uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
 ## Endpoints
@@ -34,8 +37,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8001
 | POST | `/v1/order` | detect → ink_filter → RSP order (+ optional overlay) |
 | POST | `/v1/clean` | page + `bubbles_json` → cleaned PNG + `editor_regions` + `clean` (`ok`/`partial`); `include_layers` → `clean_layers` |
 | POST | `/v1/pipeline` | bubbles → ink_filter → order → inset-fill clean in one call; `include_layers` → `clean_layers` |
-| POST | `/v1/typeset` | cleaned page + `bubbles_json` + `texts_json` → layout JSON (+ optional debug PNG / `text_layers`) |
-| POST | `/v1/compose` | original + `doc_json` (PageDoc) → preview PNG (`--off` via form `off`) |
+| GET | `/v1/typeset/fonts` | Font catalog under `assets/fonts/` (`key`, `label`, `file`, `postscript_name`) |
+| GET | `/v1/typeset/fonts/{key}/file` | Serve font bytes for browser `FontFace` |
+| POST | `/v1/typeset` | cleaned page + `bubbles_json` + `texts_json` → layout JSON (+ optional debug PNG / `text_layers`); form `font`, `overrides_json` (`font_px` / `font_scale` / `font` per bubble) |
+| POST | `/v1/compose` | original + `doc_json` (PageDoc) → preview PNG (`off`, `only_kind`, `font`); prefers layer `font_file` |
 
 `/v1/bubbles` and `/v1/pipeline` include `panels[]`, `order_confidence`, and `needs_review` by default.
 

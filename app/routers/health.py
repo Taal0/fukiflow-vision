@@ -42,14 +42,17 @@ async def health() -> HealthResponse:
         typeset_ok = get_typeset_service().ready
     except RuntimeError:
         pass
+    models = {
+        "bubble": bubble_ok,
+        "panel": panel_ok,
+        "order": order_ok,
+        "clean": clean_ok,
+        "typeset": typeset_ok,
+    }
+    if settings.vision_light:
+        models["light"] = True
     return HealthResponse(
         status="ok",
         device=settings.device,
-        models={
-            "bubble": bubble_ok,
-            "panel": panel_ok,
-            "order": order_ok,
-            "clean": clean_ok,
-            "typeset": typeset_ok,
-        },
+        models=models,
     )

@@ -51,7 +51,8 @@ def _paint_text(
     lay = layer.layout
     if lay is None or lay.status != "ok" or not lay.lines or lay.font_px is None:
         return img_rgb
-    path = font_path or lay.font_file
+    # Prefer per-layer font_file so mixed-font pages compose correctly.
+    path = lay.font_file or font_path
     if not path or not Path(path).is_file():
         return img_rgb
 

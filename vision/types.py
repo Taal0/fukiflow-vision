@@ -73,6 +73,8 @@ class BubbleLayout(BaseModel):
     lines: List[TypesetLine] = Field(default_factory=list)
     hyphenated: bool = False
     frame: Optional[BBox] = None  # text block rect from line boxes (IDML frame)
+    overflow: bool = False  # True when forced size/scale does not fit the bubble
+    override_source: Optional[str] = None  # font_px | font_scale | None
 
 
 class BubbleText(BaseModel):

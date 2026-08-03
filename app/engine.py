@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from vision.bubble.detect import BubbleDetector, get_detector, set_detector
@@ -98,6 +100,19 @@ def create_typeset_service(settings: Optional[Settings] = None) -> TypesetServic
     )
 
 
+@lru_cache(maxsize=8)
+def get_typeset_service_for_font(font_path: str) -> TypesetService:
+    """Cached TypesetService keyed by resolved font path (FontFace load once)."""
+    path = str(Path(font_path).resolve())
+    default = str(get_settings().typeset_font.resolve())
+    if path == default:
+        return get_typeset_service()
+    svc = create_typeset_service()
+    svc.settings.font_path = Path(path)
+    svc.load()
+    return svc
+
+
 __all__ = [
     "BubbleDetector",
     "PanelDetector",
@@ -109,6 +124,7 @@ __all__ = [
     "create_order_service",
     "create_clean_service",
     "create_typeset_service",
+    "get_typeset_service_for_font",
     "get_detector",
     "set_detector",
     "get_panel_detector",

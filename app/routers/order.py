@@ -10,6 +10,7 @@ from vision.bubble.ink_filter import classify, settings_from_app
 from vision.order.service import get_service as get_order_service
 
 from ..images import decode_image_b64, decode_image_bytes, encode_png_b64
+from ..light import require_full_vision
 from ..schemas import OrderResponse
 from ..settings import get_settings
 
@@ -24,6 +25,7 @@ async def reading_order(
     include_overlay: bool = Form(True),
 ) -> OrderResponse:
     """bubbles → ink_filter → panel detect + RSP reading order."""
+    require_full_vision()
     if file is None and not image_b64:
         raise HTTPException(400, "Provide multipart `file` or form field `image_b64`")
 

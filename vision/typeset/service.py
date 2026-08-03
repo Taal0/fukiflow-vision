@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 
 from vision.masks import as_bbox
 from vision.types import Bubble, BubbleLayout, BubbleText, EditorRegion
+from vision.typeset.catalog import resolve_font_path
 from vision.typeset.font import FontFace
 from vision.typeset.layout import (
     FitSettings,
@@ -21,6 +23,9 @@ from vision.typeset.profile import WidthProfile, build_width_profile
 from vision.typeset.wrap import Hyphenator, pyphen_hyphenator
 
 _service: Optional["TypesetService"] = None
+
+# Per-bubble override: {font_px?, font_scale?, font?}
+BubbleOverride = Dict[str, Any]
 
 
 def set_service(service: Optional["TypesetService"]) -> None:
@@ -68,6 +73,19 @@ def _text_map(texts: Sequence[BubbleText]) -> Dict[int, str]:
     return {int(t.bubble_id): (t.text or "") for t in texts}
 
 
+def _normalize_overrides(
+    overrides: Optional[Dict[Union[int, str], BubbleOverride]],
+) -> Dict[int, BubbleOverride]:
+    if not overrides:
+        return {}
+    out: Dict[int, BubbleOverride] = {}
+    for k, v in overrides.items():
+        if v is None:
+            continue
+        out[int(k)] = dict(v)
+    return out
+
+
 class TypesetService:
     """Place Turkish text into cleaned bubble polygons; escalate failures."""
 
@@ -101,11 +119,21 @@ class TypesetService:
             raise RuntimeError("TypesetService not loaded")
         return self._font
 
+    def _font_for(self, font_key: Optional[str]) -> FontFace:
+        if not font_key:
+            return self.font
+        path = resolve_font_path(font_key, default=self.settings.font_path)
+        if path.resolve() == Path(self.settings.font_path).resolve():
+            return self.font
+        return _cached_font(str(path))
+
     def typeset(
         self,
         img_rgb: np.ndarray,
         bubbles: Sequence[Bubble],
         texts: Sequence[BubbleText],
+        *,
+        overrides: Optional[Dict[Union[int, str], BubbleOverride]] = None,
     ) -> TypesetResult:
         if img_rgb.ndim != 3 or img_rgb.shape[2] != 3:
             raise ValueError(f"expected HxWx3 RGB, got shape {img_rgb.shape}")
@@ -125,6 +153,7 @@ class TypesetService:
             align=s.align,
         )
         by_text = _text_map(texts)
+        by_override = _normalize_overrides(overrides)
 
         layouts: List[BubbleLayout] = []
         regions: List[EditorRegion] = []
@@ -163,18 +192,24 @@ class TypesetService:
                 regions.append(as_bbox(b.bbox))
                 continue
 
+            ov = by_override.get(int(b.id), {})
+            face = self._font_for(ov.get("font") if isinstance(ov.get("font"), str) else None)
+            force_px = ov.get("font_px")
+            scale = ov.get("font_scale")
             lay = fit_bubble(
                 str(text),
                 profile,
-                self.font,
+                face,
                 ladder,
                 h,
                 bubble_id=int(b.id),
                 settings=fit,
                 hyphenator=self._hyphenator,
+                force_size_px=float(force_px) if force_px is not None else None,
+                font_scale=float(scale) if scale is not None else None,
             )
             if lay.status == "ok":
-                lay = enrich_layout_export(lay, self.font, dpi=float(s.dpi))
+                lay = enrich_layout_export(lay, face, dpi=float(s.dpi))
             layouts.append(lay)
             if lay.status == "editor":
                 regions.append(as_bbox(b.bbox))
@@ -186,3 +221,8 @@ class TypesetService:
             typeset_regions=regions,
             profiles=profiles,
         )
+
+
+@lru_cache(maxsize=16)
+def _cached_font(path: str) -> FontFace:
+    return FontFace(path)

@@ -184,6 +184,43 @@ def try_fit_size(
     return None
 
 
+def _force_place(
+    text: str,
+    profile: WidthProfile,
+    font: FontFace,
+    size_px: float,
+    *,
+    settings: FitSettings,
+) -> Tuple[List[TypesetLine], bool, float]:
+    """Best-effort placement when forced size does not fit (overflow)."""
+    lh = font.line_height(size_px, settings.leading)
+    if lh <= 0:
+        lh = float(size_px) * float(settings.leading)
+    words = text.split() or [text]
+    # One word per line, centered on profile; may exceed band width.
+    n = max(1, len(words))
+    bands = _line_bands(profile.cy, n, lh)
+    metas: List[Tuple[float, float, float]] = []
+    for y_top, y_bot in bands:
+        usable, x_left, x_right = band_min_width(
+            profile, y_top, y_bot, safety=settings.width_safety
+        )
+        metas.append((usable, x_left, x_right))
+    # Pad metas if profile bands shorter than words (cy-centered may clip).
+    while len(metas) < len(words):
+        if metas:
+            metas.append(metas[-1])
+            bands.append(bands[-1])
+        else:
+            half = 40.0
+            metas.append((2 * half, float(profile.cx) - half, float(profile.cx) + half))
+            bands.append((float(profile.y0), float(profile.y1)))
+    lines = _place_lines(
+        words, bands[: len(words)], metas[: len(words)], font=font, size_px=size_px, align=settings.align
+    )
+    return lines, False, lh
+
+
 def fit_bubble(
     text: str,
     profile: WidthProfile,
@@ -194,8 +231,14 @@ def fit_bubble(
     bubble_id: int,
     settings: Optional[FitSettings] = None,
     hyphenator: Optional[Hyphenator] = None,
+    force_size_px: Optional[float] = None,
+    font_scale: Optional[float] = None,
 ) -> BubbleLayout:
-    """Binary-search the ladder for the largest size that fits."""
+    """Binary-search the ladder for the largest size that fits.
+
+    ``force_size_px`` skips the ladder (overflow=True if it does not fit).
+    ``font_scale`` multiplies the ladder-chosen size, then re-fits.
+    """
     settings = settings or FitSettings()
     text = text.strip()
     if not text:
@@ -204,6 +247,40 @@ def fit_bubble(
         return BubbleLayout(bubble_id=bubble_id, status="editor", reason="empty_mask")
     if profile.multi_lobe:
         return BubbleLayout(bubble_id=bubble_id, status="editor", reason="multi_lobe")
+
+    override_source: Optional[str] = None
+    overflow = False
+
+    if force_size_px is not None:
+        size = max(1.0, float(force_size_px))
+        override_source = "font_px"
+        fitted = try_fit_size(
+            text, profile, font, size, settings=settings, hyphenator=hyphenator
+        )
+        if fitted is None:
+            lines, hyphenated, lh = _force_place(
+                text, profile, font, size, settings=settings
+            )
+            overflow = True
+        else:
+            lines, hyphenated, lh = fitted
+        m = font.metrics(size)
+        return BubbleLayout(
+            bubble_id=bubble_id,
+            status="ok",
+            font_family=font.family,
+            font_px=float(size),
+            font_ratio=float(size) / float(page_h) if page_h else None,
+            leading_px=float(lh),
+            font_postscript_name=font.postscript_name,
+            font_file=str(font.path),
+            align=settings.align,
+            lines=lines,
+            hyphenated=hyphenated,
+            frame=layout_frame(lines, ascent=m.ascent, descent=m.descent),
+            overflow=overflow,
+            override_source=override_source,
+        )
 
     sizes = sorted(float(s) for s in ladder)
     if not sizes:
@@ -228,6 +305,23 @@ def fit_bubble(
         return BubbleLayout(bubble_id=bubble_id, status="editor", reason="no_fit")
 
     size, lines, hyphenated, lh = best
+
+    if font_scale is not None and float(font_scale) != 1.0:
+        override_source = "font_scale"
+        scaled = max(1.0, float(size) * float(font_scale))
+        fitted = try_fit_size(
+            text, profile, font, scaled, settings=settings, hyphenator=hyphenator
+        )
+        if fitted is None:
+            lines, hyphenated, lh = _force_place(
+                text, profile, font, scaled, settings=settings
+            )
+            overflow = True
+            size = scaled
+        else:
+            lines, hyphenated, lh = fitted
+            size = scaled
+
     m = font.metrics(size)
     return BubbleLayout(
         bubble_id=bubble_id,
@@ -242,4 +336,6 @@ def fit_bubble(
         lines=lines,
         hyphenated=hyphenated,
         frame=layout_frame(lines, ascent=m.ascent, descent=m.descent),
+        overflow=overflow,
+        override_source=override_source,
     )
