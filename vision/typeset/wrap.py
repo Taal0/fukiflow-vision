@@ -72,36 +72,29 @@ def _hyphenate_fit(
     return None
 
 
-def wrap_lines(
-    text: str,
+def _wrap_paragraph(
+    words: List[str],
     line_widths: Sequence[float],
     measure: Callable[[str], float],
     *,
+    li: int,
     hyphenator: Optional[Hyphenator] = None,
-) -> Tuple[Optional[List[str]], bool]:
-    """Greedy wrap into ``len(line_widths)`` slots (or fewer if text ends early).
+) -> Optional[Tuple[List[str], bool, int]]:
+    """Greedy-wrap one paragraph's words starting at slot ``li``.
 
-    Returns ``(lines, hyphenated)`` or ``(None, hyphenated)`` if text does not
-    fit the provided width schedule (too few lines / a token never fits).
+    Returns ``(lines, hyphenated, next_li)`` or ``None`` if it doesn't fit.
     """
-    words = text.split()
-    if not words:
-        return [], False
-    if not line_widths:
-        return None, False
-
     lines: List[str] = []
     hyphenated = False
     wi = 0
-    li = 0
     current = ""
 
     while wi < len(words):
         if li >= len(line_widths):
-            return None, hyphenated
+            return None
         max_w = float(line_widths[li])
         if max_w <= 0:
-            return None, hyphenated
+            return None
 
         word = words[wi]
         candidate = word if not current else f"{current} {word}"
@@ -130,12 +123,59 @@ def wrap_lines(
                 continue
 
         # Cannot place this word on this line width.
-        return None, hyphenated
+        return None
 
     if current:
         if li >= len(line_widths):
             # Shouldn't happen: we had room while accumulating.
-            return None, hyphenated
+            return None
         lines.append(current)
+        li += 1
+
+    return lines, hyphenated, li
+
+
+def wrap_lines(
+    text: str,
+    line_widths: Sequence[float],
+    measure: Callable[[str], float],
+    *,
+    hyphenator: Optional[Hyphenator] = None,
+) -> Tuple[Optional[List[str]], bool]:
+    """Greedy wrap into ``len(line_widths)`` slots (or fewer if text ends early).
+
+    A literal ``\\n`` in ``text`` is honored as a forced line break — the
+    letterer's manual line splits (typed in the sidebar box) always win;
+    each resulting segment is still auto-wrapped if it doesn't fit its slot.
+
+    Returns ``(lines, hyphenated)`` or ``(None, hyphenated)`` if text does not
+    fit the provided width schedule (too few lines / a token never fits).
+    """
+    if not text.strip():
+        return [], False
+    if not line_widths:
+        return None, False
+
+    paragraphs = text.split("\n")
+    lines: List[str] = []
+    hyphenated = False
+    li = 0
+
+    for para in paragraphs:
+        words = para.split()
+        if not words:
+            # Explicit blank line — still consumes one vertical slot.
+            if li >= len(line_widths):
+                return None, hyphenated
+            lines.append("")
+            li += 1
+            continue
+
+        result = _wrap_paragraph(words, line_widths, measure, li=li, hyphenator=hyphenator)
+        if result is None:
+            return None, hyphenated
+        para_lines, para_hyphenated, li = result
+        lines.extend(para_lines)
+        hyphenated = hyphenated or para_hyphenated
 
     return lines, hyphenated

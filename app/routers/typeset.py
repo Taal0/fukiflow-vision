@@ -84,10 +84,20 @@ async def typeset(
     font: str | None = Form(None, description="Catalog key or font filename"),
     overrides_json: str | None = Form(
         None,
-        description='Per-bubble overrides: {"3": {"font_px": 28, "font_scale": 1.1, "font": "comic_neue"}}',
+        description=(
+            'Per-bubble overrides: {"3": {"font_px": 28, "font_scale": 1.1, '
+            '"font": "comic_neue", "frame": [x0,y0,x1,y1], "leading": 1.15, '
+            '"align": "center"|"left"}}'
+        ),
     ),
 ) -> TypesetResponse:
-    """Layout JSON for cleaned bubbles + texts. Optional debug PNG / text layers."""
+    """Layout JSON for cleaned bubbles + texts. Optional debug PNG / text layers.
+
+    When an override includes ``frame``, the width profile is built from that
+    rectangle (reflow-only box) instead of the bubble polygon. ``font_px``
+    forces size via ``force_size_px`` so only line breaks are recomputed.
+    ``leading`` / ``align`` override page defaults for that bubble.
+    """
     if file is None and not image_b64:
         raise HTTPException(400, "Provide multipart `file` or form field `image_b64`")
 

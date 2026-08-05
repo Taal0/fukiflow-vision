@@ -19,12 +19,16 @@ from vision.typeset.layout import (
     fit_bubble,
     font_ladder,
 )
-from vision.typeset.profile import WidthProfile, build_width_profile
+from vision.typeset.profile import (
+    WidthProfile,
+    build_width_profile,
+    rect_width_profile,
+)
 from vision.typeset.wrap import Hyphenator, pyphen_hyphenator
 
 _service: Optional["TypesetService"] = None
 
-# Per-bubble override: {font_px?, font_scale?, font?}
+# Per-bubble override: {font_px?, font_scale?, font?, frame?, leading?, align?}
 BubbleOverride = Dict[str, Any]
 
 
@@ -160,19 +164,44 @@ class TypesetService:
         profiles: Dict[int, WidthProfile] = {}
 
         for b in bubbles:
+            ov = by_override.get(int(b.id), {})
+            frame_ov = ov.get("frame")
+
             # Cap margin so narrow bubbles don't get over-eroded.
-            bbox = as_bbox(b.bbox)
-            bw = max(1, bbox[2] - bbox[0])
-            bh = max(1, bbox[3] - bbox[1])
+            # Frame override uses the letterer's box; margin from that box.
+            if (
+                isinstance(frame_ov, (list, tuple))
+                and len(frame_ov) >= 4
+                and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in frame_ov[:4])
+            ):
+                fx0, fy0, fx1, fy1 = (float(v) for v in frame_ov[:4])
+                bw = max(1, int(fx1 - fx0))
+                bh = max(1, int(fy1 - fy0))
+            else:
+                bbox = as_bbox(b.bbox)
+                bw = max(1, bbox[2] - bbox[0])
+                bh = max(1, bbox[3] - bbox[1])
+                frame_ov = None
+
             cap_px = max(0, int(min(bw, bh) * float(s.margin_cap_ratio)))
             margin_px = min(page_margin_px, cap_px)
-            profile = build_width_profile(
-                (h, w),
-                b,
-                clean_inset=s.clean_inset,
-                margin_px=margin_px,
-                multi_lobe_min_area_ratio=s.multi_lobe_min_area_ratio,
-            )
+
+            if frame_ov is not None:
+                # Editor text box — fill the dashed rect; only a tiny safety inset.
+                # (Polygon path still uses clean_inset + typographic margin.)
+                profile = rect_width_profile(
+                    (h, w),
+                    frame_ov[:4],
+                    margin_px=min(2, margin_px),
+                )
+            else:
+                profile = build_width_profile(
+                    (h, w),
+                    b,
+                    clean_inset=s.clean_inset,
+                    margin_px=margin_px,
+                    multi_lobe_min_area_ratio=s.multi_lobe_min_area_ratio,
+                )
             profiles[int(b.id)] = profile
 
             if (b.clean_status or "unknown") == "editor":
@@ -192,10 +221,17 @@ class TypesetService:
                 regions.append(as_bbox(b.bbox))
                 continue
 
-            ov = by_override.get(int(b.id), {})
             face = self._font_for(ov.get("font") if isinstance(ov.get("font"), str) else None)
             force_px = ov.get("font_px")
             scale = ov.get("font_scale")
+            leading = ov.get("leading")
+            align = ov.get("align")
+            bubble_fit = FitSettings(
+                leading=float(leading) if leading is not None else fit.leading,
+                width_safety=fit.width_safety,
+                max_iters=fit.max_iters,
+                align=str(align) if align else fit.align,
+            )
             lay = fit_bubble(
                 str(text),
                 profile,
@@ -203,7 +239,7 @@ class TypesetService:
                 ladder,
                 h,
                 bubble_id=int(b.id),
-                settings=fit,
+                settings=bubble_fit,
                 hyphenator=self._hyphenator,
                 force_size_px=float(force_px) if force_px is not None else None,
                 font_scale=float(scale) if scale is not None else None,

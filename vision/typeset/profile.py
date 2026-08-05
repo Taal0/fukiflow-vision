@@ -91,6 +91,85 @@ def _lobe_decision(
     return len(significant) > 1, secondary, ratio, ignored
 
 
+def rect_width_profile(
+    shape: Tuple[int, int],
+    frame: Sequence[float],
+    *,
+    margin_px: int = 0,
+) -> WidthProfile:
+    """Build a WidthProfile from an axis-aligned text frame ``[x0,y0,x1,y1]``.
+
+    Used when the letterer overrides the bubble polygon with a movable box.
+    ``band_min_width`` works unchanged on the resulting single-run rows.
+    """
+    h, w = shape
+    if len(frame) < 4:
+        return WidthProfile(
+            mask=np.zeros((h, w), dtype=np.uint8),
+            cx=0.0,
+            cy=0.0,
+            y0=0,
+            y1=0,
+            empty=True,
+        )
+
+    x0 = max(0, int(np.floor(float(frame[0]))))
+    y0 = max(0, int(np.floor(float(frame[1]))))
+    x1 = min(w, int(np.ceil(float(frame[2]))))
+    y1 = min(h, int(np.ceil(float(frame[3]))))
+    if x1 <= x0 or y1 <= y0:
+        return WidthProfile(
+            mask=np.zeros((h, w), dtype=np.uint8),
+            cx=0.0,
+            cy=0.0,
+            y0=0,
+            y1=0,
+            empty=True,
+        )
+
+    mask = np.zeros((h, w), dtype=np.uint8)
+    mask[y0:y1, x0:x1] = 1
+    mask = erode_mask(mask, max(0, int(margin_px)))
+    if not mask.any():
+        return WidthProfile(
+            mask=mask,
+            cx=0.0,
+            cy=0.0,
+            y0=0,
+            y1=0,
+            empty=True,
+        )
+
+    ys, xs = np.where(mask > 0)
+    cy = float(ys.mean())
+    cx = float(xs.mean())
+    ry0 = int(ys.min())
+    ry1 = int(ys.max()) + 1
+
+    row_runs: List[List[Run]] = []
+    for y in range(ry0, ry1):
+        runs = _row_runs(mask[y])
+        runs = [(a, b) for a, b in runs if (b - a) >= 2]
+        row_runs.append(runs)
+
+    return WidthProfile(
+        mask=mask,
+        cx=cx,
+        cy=cy,
+        y0=ry0,
+        y1=ry1,
+        row_runs=row_runs,
+        multi_lobe=False,
+        neck_depth=0.0,
+        empty=False,
+        cc_count=1,
+        primary_area=int(mask.sum()),
+        secondary_area=0,
+        secondary_area_ratio=0.0,
+        ignored_fragments=0,
+    )
+
+
 def build_width_profile(
     shape: Tuple[int, int],
     bubble: Bubble,
