@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from vision.document import PageDoc
 from vision.layers.compose import compose
-from vision.typeset.catalog import resolve_font_path
+from vision.typeset.catalog import resolve_font_path, resolve_portable_font
 
 from ..images import decode_image_b64, decode_image_bytes, encode_png_b64, encode_png_bytes
 from ..settings import get_settings
@@ -17,7 +16,7 @@ router = APIRouter(prefix="/v1", tags=["compose"])
 
 
 def _resolve_compose_font(doc: PageDoc, font: str | None) -> str | None:
-    """Request font > first text layer font_file > global default."""
+    """Request font > first text layer (catalog-first) > global default."""
     settings = get_settings()
     if font and str(font).strip():
         try:
@@ -27,16 +26,12 @@ def _resolve_compose_font(doc: PageDoc, font: str | None) -> str | None:
 
     for layer in doc.layers:
         if layer.kind == "text" and layer.layout and layer.layout.font_file:
-            path = Path(layer.layout.font_file)
-            if path.is_file():
-                return str(path.resolve())
-            # Relative / basename fallback via catalog
-            try:
-                return str(
-                    resolve_font_path(path.name, default=settings.typeset_font)
-                )
-            except FileNotFoundError:
-                continue
+            resolved = resolve_portable_font(
+                layer.layout.font_file,
+                fallback=settings.typeset_font,
+            )
+            if resolved is not None:
+                return str(resolved)
 
     default = settings.typeset_font
     return str(default) if default.is_file() else None

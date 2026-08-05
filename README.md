@@ -40,7 +40,7 @@ VISION_LIGHT=1 uvicorn app.main:app --host 127.0.0.1 --port 8001
 | GET | `/v1/typeset/fonts` | Font catalog under `assets/fonts/` (`key`, `label`, `file`, `postscript_name`) |
 | GET | `/v1/typeset/fonts/{key}/file` | Serve font bytes for browser `FontFace` |
 | POST | `/v1/typeset` | cleaned page + `bubbles_json` + `texts_json` → layout JSON (+ optional debug PNG / `text_layers`); form `font`, `overrides_json` (`font_px` / `font_scale` / `font` per bubble) |
-| POST | `/v1/compose` | original + `doc_json` (PageDoc) → preview PNG (`off`, `only_kind`, `font`); prefers layer `font_file` |
+| POST | `/v1/compose` | original + `doc_json` (PageDoc) → preview PNG (`off`, `only_kind`, `font`); per-layer `font_file` resolved catalog-first (basename), absolute path fallback |
 
 `/v1/bubbles` and `/v1/pipeline` include `panels[]`, `order_confidence`, and `needs_review` by default.
 
@@ -73,6 +73,9 @@ HOST=http://127.0.0.1:8001 python scripts/batch_clean.py ...
 python scripts/compose_doc.py out/page-doc.json
 python scripts/compose_doc.py out/page-doc.json --off cln_3,txt_7
 python scripts/compose_doc.py out/page-doc.json --only-kind clean
+# Font-portability + paint golden (download/canvas contract)
+python scripts/parity_compose.py
+python scripts/parity_compose.py --write-golden fixtures/parity/golden.png
 ```
 
 Layer / export model: [`docs/export-contract.md`](docs/export-contract.md).

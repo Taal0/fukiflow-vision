@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional, Sequence, Set, Tuple
 
 import numpy as np
@@ -10,6 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from vision.document import Layer, PageDoc, Stroke
 from vision.masks import as_bbox, erode_mask, polygon_mask
+from vision.typeset.catalog import resolve_portable_font
 
 
 def render_mask(layer: Layer, shape: Tuple[int, int]) -> np.ndarray:
@@ -102,15 +102,16 @@ def _paint_text(
     lay = layer.layout
     if lay is None or lay.status != "ok" or not lay.lines or lay.font_px is None:
         return img_rgb
-    # Prefer per-layer font_file so mixed-font pages compose correctly.
-    path = lay.font_file or font_path
-    if not path or not Path(path).is_file():
+    # Catalog / basename first; absolute path only as fallback so Mac-seeded
+    # font_file paths still compose on other machines.
+    resolved = resolve_portable_font(lay.font_file, fallback=font_path)
+    if resolved is None:
         return img_rgb
 
     pil = Image.fromarray(img_rgb)
     draw = ImageDraw.Draw(pil)
     size = max(1, int(round(lay.font_px)))
-    font = ImageFont.truetype(str(path), size=size)
+    font = ImageFont.truetype(str(resolved), size=size)
     for line in lay.lines:
         draw.text(
             (line.x, line.baseline_y),

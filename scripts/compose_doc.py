@@ -100,11 +100,15 @@ def main(argv: list[str]) -> int:
     off = {s.strip() for s in args.off.split(",") if s.strip()}
     font_path = str(args.font.resolve()) if args.font else None
     if font_path is None:
-        # Prefer first text layer's font_file, else repo default.
+        from vision.typeset.catalog import resolve_portable_font
+
+        # Catalog-first: prefer basename of first text layer font_file.
         for L in doc.layers:
             if L.kind == "text" and L.layout and L.layout.font_file:
-                font_path = L.layout.font_file
-                break
+                resolved = resolve_portable_font(L.layout.font_file)
+                if resolved is not None:
+                    font_path = str(resolved)
+                    break
         if font_path is None:
             default = _ROOT / "assets" / "fonts" / "BubbleSans-Regular.otf"
             if default.is_file():

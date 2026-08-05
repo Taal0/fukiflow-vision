@@ -110,3 +110,48 @@ def resolve_font_path(
             return path.resolve()
 
     raise FileNotFoundError(f"font not found: {font}")
+
+
+def resolve_portable_font(
+    font_file: Optional[str],
+    *,
+    fallback: Optional[str | Path] = None,
+) -> Optional[Path]:
+    """Resolve a layout ``font_file`` for compose across machines.
+
+    Catalog key / basename is tried first so absolute paths written on another
+    host (typeset metadata) still resolve via ``assets/fonts``. Absolute path
+    is only used when that file exists locally and catalog lookup failed.
+    """
+    raw = (font_file or "").strip()
+    if raw:
+        cand = Path(raw)
+        # Prefer catalog: key, filename, or basename of an absolute path.
+        hints: list[str] = []
+        if cand.name and cand.name != raw:
+            hints.append(cand.name)
+            if cand.stem:
+                hints.append(cand.stem)
+        hints.append(raw)
+        seen: set[str] = set()
+        for hint in hints:
+            if not hint or hint in seen:
+                continue
+            seen.add(hint)
+            try:
+                return resolve_font_path(hint)
+            except FileNotFoundError:
+                continue
+        # Absolute path fallback (custom font not in catalog, present on disk).
+        if cand.is_file():
+            return cand.resolve()
+
+    if fallback is None:
+        return None
+    fb = Path(fallback)
+    if fb.is_file():
+        return fb.resolve()
+    try:
+        return resolve_font_path(str(fallback))
+    except FileNotFoundError:
+        return None

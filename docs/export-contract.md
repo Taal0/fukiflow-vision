@@ -41,7 +41,7 @@ internals. This iteration ships the contract and fields only — no PSD/IDML wri
 | `runs` / `lines[]` | **Hard breaks** with explicit baselines / leading |
 | `font_pt` / `leading_pt` | `px * 72 / dpi` |
 | `font_postscript_name` | InDesign PostScript name (not just family) |
-| `font_file` | Absolute path used at typeset time |
+| `font_file` | Typeset-time path (often absolute). **Compose resolves catalog basename first**; absolute path is fallback only. |
 | `align` | `center` \| `left` |
 | `hyphenated` | If **true**, export **must disable hyphenation** — soft hyphens are already embedded in `lines[].text` |
 
