@@ -30,6 +30,7 @@ internals. This iteration ships the contract and fields only — no PSD/IDML wri
 
 - Parametric strokes live on `Layer.strokes` (`fill` | `restore`, color, radius, points).
 - Export flattens them to a single RGBA raster (no live stroke list in PSD/IDML).
+- `rgba_file` may be empty until a writer bakes strokes via `render_layer_rgba`.
 - `z` sits between clean (100+) and text (200+), typically `150 + bubble_id`.
 - `restore` stamps original source pixels; `fill` stamps a solid RGB sampled at stroke start.
 
@@ -41,7 +42,7 @@ internals. This iteration ships the contract and fields only — no PSD/IDML wri
 | `runs` / `lines[]` | **Hard breaks** with explicit baselines / leading |
 | `font_pt` / `leading_pt` | `px * 72 / dpi` |
 | `font_postscript_name` | InDesign PostScript name (not just family) |
-| `font_file` | Typeset-time path (often absolute). **Compose resolves catalog basename first**; absolute path is fallback only. |
+| `font_file` | Portable basename (or legacy absolute). Compose resolves catalog-first. |
 | `align` | `center` \| `left` |
 | `hyphenated` | If **true**, export **must disable hyphenation** — soft hyphens are already embedded in `lines[].text` |
 

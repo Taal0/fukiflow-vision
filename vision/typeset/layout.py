@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -12,6 +13,11 @@ from vision.types import BBox, BubbleLayout, TypesetLine
 from vision.typeset.font import FontFace
 from vision.typeset.profile import WidthProfile, band_min_width
 from vision.typeset.wrap import Hyphenator, wrap_lines
+
+
+def _portable_font_file(font: FontFace) -> str:
+    """Basename only — compose resolves via catalog (desktop / multi-host safe)."""
+    return Path(font.path).name
 
 
 def px_to_pt(px: float, dpi: float) -> float:
@@ -47,7 +53,7 @@ def enrich_layout_export(
 ) -> BubbleLayout:
     """Attach pt sizes, font file/PS name, and frame for PSD/IDML export."""
     updates: dict = {
-        "font_file": str(font.path),
+        "font_file": _portable_font_file(font),
         "font_postscript_name": font.postscript_name,
         "font_family": layout.font_family or font.family,
     }
@@ -273,7 +279,7 @@ def fit_bubble(
             font_ratio=float(size) / float(page_h) if page_h else None,
             leading_px=float(lh),
             font_postscript_name=font.postscript_name,
-            font_file=str(font.path),
+            font_file=_portable_font_file(font),
             align=settings.align,
             lines=lines,
             hyphenated=hyphenated,
@@ -331,7 +337,7 @@ def fit_bubble(
         font_ratio=float(size) / float(page_h) if page_h else None,
         leading_px=float(lh),
         font_postscript_name=font.postscript_name,
-        font_file=str(font.path),
+        font_file=_portable_font_file(font),
         align=settings.align,
         lines=lines,
         hyphenated=hyphenated,
