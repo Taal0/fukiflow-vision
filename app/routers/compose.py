@@ -49,7 +49,7 @@ async def compose_page(
     doc_json: str = Form(...),
     as_base64: bool = Form(False),
     off: str | None = Form(None, description="Comma-separated layer ids to disable"),
-    only_kind: str | None = Form(None, description="clean | text"),
+    only_kind: str | None = Form(None, description="clean | text | paint"),
     font: str | None = Form(None, description="Catalog key or font filename override"),
 ):
     """Compose source image + PageDoc layers → preview PNG."""
@@ -71,8 +71,8 @@ async def compose_page(
 
     off_ids = {s.strip() for s in (off or "").split(",") if s.strip()}
     kind = only_kind.strip() if only_kind and only_kind.strip() else None
-    if kind and kind not in {"clean", "text"}:
-        raise HTTPException(400, "only_kind must be 'clean' or 'text'")
+    if kind and kind not in {"clean", "text", "paint"}:
+        raise HTTPException(400, "only_kind must be 'clean', 'text', or 'paint'")
 
     font_path = _resolve_compose_font(doc, font)
     try:

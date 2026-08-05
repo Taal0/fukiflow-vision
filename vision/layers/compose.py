@@ -8,7 +8,7 @@ from typing import Optional, Sequence, Set, Tuple
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from vision.document import Layer, PageDoc
+from vision.document import Layer, PageDoc, Stroke
 from vision.masks import as_bbox, erode_mask, polygon_mask
 
 
@@ -40,6 +40,57 @@ def render_mask(layer: Layer, shape: Tuple[int, int]) -> np.ndarray:
 
     # rle / unknown → empty (not implemented this iteration)
     return np.zeros((h, w), dtype=np.uint8)
+
+
+def stroke_mask(stroke: Stroke, shape: Tuple[int, int]) -> np.ndarray:
+    """Rasterize a brush stroke as a binary mask (round stamps + segments)."""
+    h, w = shape
+    mask = np.zeros((h, w), dtype=np.uint8)
+    pts = stroke.points or []
+    if not pts:
+        return mask
+    radius = max(0.5, float(stroke.radius_px))
+    # Draw with PIL for stable round stamps along the polyline.
+    pil = Image.fromarray(mask * 255, mode="L")
+    draw = ImageDraw.Draw(pil)
+    r = radius
+    diam = max(1, int(round(r * 2)))
+    coords = [(float(p[0]), float(p[1])) for p in pts if len(p) >= 2]
+    if not coords:
+        return mask
+    if len(coords) == 1:
+        x, y = coords[0]
+        draw.ellipse(
+            (x - r, y - r, x + r, y + r),
+            fill=255,
+        )
+    else:
+        # Wide line covers gaps between stamps; end caps are round.
+        draw.line(coords, fill=255, width=max(1, diam), joint="curve")
+        for x, y in coords:
+            draw.ellipse((x - r, y - r, x + r, y + r), fill=255)
+    return (np.asarray(pil, dtype=np.uint8) > 0).astype(np.uint8)
+
+
+def apply_paint_layer(
+    out: np.ndarray,
+    source_rgb: np.ndarray,
+    layer: Layer,
+) -> np.ndarray:
+    """Apply paint strokes onto ``out`` (fill → solid color, restore → source)."""
+    if not layer.strokes:
+        return out
+    for stroke in layer.strokes:
+        mask = stroke_mask(stroke, out.shape[:2])
+        if not mask.any():
+            continue
+        if stroke.mode == "restore":
+            out[mask > 0] = source_rgb[mask > 0]
+        elif stroke.mode == "fill":
+            if stroke.color is None:
+                continue
+            out[mask > 0] = stroke.color
+    return out
 
 
 def _paint_text(
@@ -79,7 +130,7 @@ def compose(
     off: Optional[Set[str]] = None,
     only_kind: Optional[str] = None,
 ) -> np.ndarray:
-    """preview = source + enabled clean layers + enabled text layers (z-order)."""
+    """preview = source + enabled clean/paint/text layers (z-order)."""
     if source_rgb.ndim != 3 or source_rgb.shape[2] != 3:
         raise ValueError(f"expected HxWx3 RGB, got shape {source_rgb.shape}")
 
@@ -99,6 +150,8 @@ def compose(
             mask = render_mask(layer, (h, w))
             if mask.any():
                 out[mask > 0] = layer.fill_color
+        elif layer.kind == "paint":
+            out = apply_paint_layer(out, source_rgb, layer)
         elif layer.kind == "text":
             out = _paint_text(out, layer, font_path=font_path)
     return out
@@ -109,6 +162,7 @@ def render_layer_rgba(
     shape: Tuple[int, int],
     *,
     font_path: Optional[str] = None,
+    source_rgb: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Single layer as HxWx4 RGBA (transparent outside content)."""
     h, w = shape
@@ -122,6 +176,26 @@ def render_layer_rgba(
             return rgba
         r, g, b = layer.fill_color
         rgba[mask > 0] = (r, g, b, 255)
+        return rgba
+
+    if layer.kind == "paint":
+        # Bake strokes onto a transparent canvas. restore needs source pixels.
+        if not layer.strokes:
+            return rgba
+        src = source_rgb
+        if src is None:
+            src = np.zeros((h, w, 3), dtype=np.uint8)
+        # Start from zeros; apply fill as opaque color, restore as source RGB.
+        for stroke in layer.strokes:
+            mask = stroke_mask(stroke, (h, w))
+            if not mask.any():
+                continue
+            if stroke.mode == "restore":
+                rgba[mask > 0, :3] = src[mask > 0]
+                rgba[mask > 0, 3] = 255
+            elif stroke.mode == "fill" and stroke.color is not None:
+                r, g, b = stroke.color
+                rgba[mask > 0] = (r, g, b, 255)
         return rgba
 
     if layer.kind == "text":

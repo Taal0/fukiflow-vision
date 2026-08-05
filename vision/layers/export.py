@@ -63,6 +63,21 @@ def to_export_items(doc: PageDoc) -> List[ExportItem]:
                     fill_color=layer.fill_color,
                 )
             )
+        elif layer.kind == "paint":
+            # Paint strokes bake to a flat raster at export time (no live strokes).
+            items.append(
+                ExportItem(
+                    id=layer.id,
+                    kind="raster",
+                    name=layer.name,
+                    group=layer.group,
+                    bubble_id=layer.bubble_id,
+                    enabled=layer.enabled,
+                    z=layer.z,
+                    bbox=layer.bbox,
+                    rgba_file=layer.raster_file,
+                )
+            )
         elif layer.kind == "text":
             lay = layer.layout
             runs: List[TextRun] = []

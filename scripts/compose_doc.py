@@ -142,7 +142,9 @@ def main(argv: list[str]) -> int:
         h, w = source.shape[:2]
         n = 0
         for layer in doc.layers:
-            rgba = render_layer_rgba(layer, (h, w), font_path=font_path)
+            rgba = render_layer_rgba(
+                layer, (h, w), font_path=font_path, source_rgb=source
+            )
             if not np.any(rgba[:, :, 3]):
                 continue
             dest = layers_dir / f"{layer.id}.png"

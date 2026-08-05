@@ -1,4 +1,4 @@
-"""Page document + layer model (clean/text; PSD/IDML export later)."""
+"""Page document + layer model (clean/text/paint; PSD/IDML export later)."""
 
 from __future__ import annotations
 
@@ -31,19 +31,30 @@ class MaskSpec(BaseModel):
     file: Optional[str] = None  # png_alpha
 
 
-class Layer(BaseModel):
-    """One composable page layer (clean fill or text layout)."""
+class Stroke(BaseModel):
+    """Parametric brush stroke (no raster payload)."""
 
-    id: str  # "cln_3" / "txt_3" — stable
-    kind: str  # clean | text  (later: sfx | paint | note)
+    id: str
+    mode: str  # fill | restore
+    color: Optional[Tuple[int, int, int]] = None  # required for fill
+    radius_px: float
+    points: List[Point] = Field(default_factory=list)
+    bubble_id: Optional[int] = None
+
+
+class Layer(BaseModel):
+    """One composable page layer (clean fill, text layout, or paint strokes)."""
+
+    id: str  # "cln_3" / "txt_3" / "pnt_3" — stable
+    kind: str  # clean | text | paint  (later: sfx | note)
     name: str  # "Clean / bubble 3" — PS layer name
     group: Optional[str] = None  # "bubble_3" — PS group / IDML group
     bubble_id: Optional[int] = None
     enabled: bool = True
     opacity: float = 1.0
     blend: str = "normal"
-    z: int = 0  # clean 100+, text 200+
-    source_step: str = ""  # "clean.inset_fill.v1" | "typeset.v1"
+    z: int = 0  # clean 100+, paint 150+, text 200+
+    source_step: str = ""  # "clean.inset_fill.v1" | "typeset.v1" | "paint.v1"
     bbox: BBox
     # kind == clean
     mask: Optional[MaskSpec] = None
@@ -52,6 +63,8 @@ class Layer(BaseModel):
     # kind == text
     layout: Optional[BubbleLayout] = None
     frame: Optional[BBox] = None  # IDML text frame rectangle
+    # kind == paint
+    strokes: List[Stroke] = Field(default_factory=list)
 
 
 class DocFlags(BaseModel):

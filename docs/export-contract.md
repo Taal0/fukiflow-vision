@@ -26,6 +26,13 @@ internals. This iteration ships the contract and fields only — no PSD/IDML wri
 - Optional `rgba_file` / `raster_file` when a baked patch is preferred.
 - Fill is solid `fill_color` RGB.
 
+## Paint layers (`kind=raster` in ExportItem)
+
+- Parametric strokes live on `Layer.strokes` (`fill` | `restore`, color, radius, points).
+- Export flattens them to a single RGBA raster (no live stroke list in PSD/IDML).
+- `z` sits between clean (100+) and text (200+), typically `150 + bubble_id`.
+- `restore` stamps original source pixels; `fill` stamps a solid RGB sampled at stroke start.
+
 ## Text layers (`kind=text` — live text)
 
 | Field | Meaning |
