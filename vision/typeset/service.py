@@ -28,7 +28,8 @@ from vision.typeset.wrap import Hyphenator, pyphen_hyphenator
 
 _service: Optional["TypesetService"] = None
 
-# Per-bubble override: {font_px?, font_scale?, font?, frame?, leading?, align?}
+# Per-bubble override: {font_px?, font_scale?, font?, frame?, leading?, align?, force?}
+# ``force: true`` opts into typeset for clean_status=editor (letterer trial).
 BubbleOverride = Dict[str, Any]
 
 
@@ -204,7 +205,9 @@ class TypesetService:
                 )
             profiles[int(b.id)] = profile
 
-            if (b.clean_status or "unknown") == "editor":
+            # Textured-fill bubbles skip auto typeset unless the letterer
+            # explicitly opts in via override ``force: true`` (UI: Dizgi dene).
+            if (b.clean_status or "unknown") == "editor" and not ov.get("force"):
                 lay = BubbleLayout(
                     bubble_id=int(b.id), status="editor", reason="clean_editor"
                 )
