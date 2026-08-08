@@ -21,10 +21,13 @@ async def detect_bubbles(
     file: UploadFile | None = File(None),
     image_b64: str | None = Form(None),
     page_id: str | None = Form(None),
+    conf: float | None = Form(None),
 ) -> BubblesResponse:
     require_full_vision()
     if file is None and not image_b64:
         raise HTTPException(400, "Provide multipart `file` or form field `image_b64`")
+    if conf is not None and not (0.0 < conf <= 1.0):
+        raise HTTPException(400, "conf must be in (0, 1]")
 
     try:
         if file is not None:
@@ -35,7 +38,7 @@ async def detect_bubbles(
         raise HTTPException(400, f"Invalid image: {e}") from e
 
     detector = get_detector()
-    raw = detector.predict(img)
+    raw = detector.predict(img, conf=conf)
     ink_settings = settings_from_app(get_settings())
     bubbles, _force_editor = classify(img, raw, ink_settings)
     result = get_order_service().order(img, bubbles)

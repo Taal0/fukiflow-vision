@@ -49,7 +49,9 @@ class BubbleDetector:
         self._model = YOLO(str(self.weight))
         self.ready = True
 
-    def predict(self, img_rgb: np.ndarray) -> List[Bubble]:
+    def predict(
+        self, img_rgb: np.ndarray, *, conf: Optional[float] = None
+    ) -> List[Bubble]:
         if self._model is None:
             raise RuntimeError("BubbleDetector.load() not called")
 
@@ -59,7 +61,7 @@ class BubbleDetector:
         img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
         results = self._model.predict(
             source=img_bgr,
-            conf=self.conf,
+            conf=self.conf if conf is None else float(conf),
             imgsz=self.imgsz,
             device=self.device,
             verbose=False,

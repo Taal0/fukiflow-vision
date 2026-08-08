@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from . import engine as engine_mod
+from .logging_mw import ResponseSummaryMiddleware
 from .routers import bubbles, clean, compose, health, order, pipeline, typeset
 from .settings import get_settings
 
@@ -50,6 +51,8 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+app.add_middleware(ResponseSummaryMiddleware)
 
 app.include_router(health.router)
 app.include_router(bubbles.router)
