@@ -28,6 +28,54 @@ uvicorn app.main:app --host 0.0.0.0 --port 8001
 VISION_LIGHT=1 uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
+## Modal (serverless full YOLO)
+
+Scale-to-zero GPU worker for the live demo VPS (`VISION_MODE=remote` + `VISION_FULL_URL`). Wrapper only — FastAPI routes unchanged. See `modal_app.py`.
+
+If `source .venv/bin/activate` then `modal: command not found`, the venv still points at an old repo path (project was moved). **Do not recreate the venv** — fix paths once:
+
+```bash
+./scripts/fix_venv_path.sh
+source .venv/bin/activate
+```
+
+Until then, use the full venv without activate:
+
+```bash
+.venv.broken-20260823/bin/python -m modal setup   # if backup not restored yet
+# or after fix_venv_path.sh:
+.venv/bin/python -m modal setup
+```
+
+```bash
+# once: Modal account + CLI (already in this venv after prior pip install)
+modal setup
+
+# deploy from this repo (needs local models/ as above)
+modal deploy modal_app.py
+# → HTTPS URL printed (…-fastapi-app.modal.run)
+
+# optional: ephemeral with live reload
+modal serve modal_app.py
+```
+
+Smoke after deploy:
+
+```bash
+curl -s https://<url>/health | jq
+curl -s -F "file=@path/to/page.png" https://<url>/v1/bubbles | jq '.bubbles | length'
+```
+
+On the 2GB app host (`fukiflow-app.service`):
+
+```
+VISION_MODE=remote
+VISION_URL=http://127.0.0.1:8001
+VISION_FULL_URL=https://taal0--fukiflow-vision-fastapi-app.modal.run
+```
+
+GPU = T4; scales to zero after 90s idle (`scaledown_window`). Keep `min_containers` unset (0). Do not leave warm workers on.
+
 ## Endpoints
 
 | Method | Path | Purpose |
@@ -114,6 +162,7 @@ Default font: `assets/fonts/BubbleSans-Regular.otf` (OFL). Override path with `T
 - `vision/typeset/` — width profile, wrap/hyphen, font-fit ladder, layout JSON
 - `vision/masks.py` — shared polygon / ring / ink helpers
 - `app/` — FastAPI wrapper (`engine.py` loads bubble + panel + order + clean + typeset)
+- `modal_app.py` — Modal ASGI deploy (full YOLO, scale-to-zero)
 - `models/bubble/` — YOLO-seg weights (`BUBBLE_WEIGHT`)
 - `models/panel/` — YOLO panel weights (`PANEL_WEIGHT`)
 - `assets/fonts/` — Bubble Sans (OFL) for typeset
@@ -157,4 +206,4 @@ Default font: `assets/fonts/BubbleSans-Regular.otf` (OFL). Override path with `T
 
 ## Out of scope (this revision)
 
-OCR, AI rerank (only `needs_review` flag), panel polygon/seg, double-page spread, SFX class / filter, Photoshop/IDML export, auto multi-lobe split, Docker/cloud GPU, auth.
+OCR, AI rerank (only `needs_review` flag), panel polygon/seg, double-page spread, SFX class / filter, Photoshop/IDML export, auto multi-lobe split, Modal proxy auth / VPS-only lock, auth.
